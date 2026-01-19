@@ -1,0 +1,37 @@
+# fracta設定ファイルサンプル
+# このファイルを fracta.local.toml にコピーして使用してください
+#
+# 使用方法: cp fracta.toml.example fracta.local.toml
+
+[setup]
+# worktree作成時に自動実行されるコマンド
+commands = [
+  # .envファイルをメインリポジトリからコピー（backend）
+  {
+    run = "cp $MAIN_REPO/backend/.env backend/.env",
+    description = "Copy .env file (backend)",
+    working_dir = ".",
+    optional = true  # ファイルが存在しなくてもエラーにしない
+  },
+
+  # .envファイルをメインリポジトリからコピー（frontend）
+  {
+    run = "cp $MAIN_REPO/frontend/.env frontend/.env",
+    description = "Copy .env file (frontend)",
+    working_dir = ".",
+    optional = true  # ファイルが存在しなくてもエラーにしない
+  },
+
+  # その他のセットアップコマンド例
+  # {
+  #   run = "npm install",
+  #   description = "Install npm dependencies",
+  #   working_dir = "frontend",
+  #   optional = false
+  # },
+]
+
+# 利用可能な環境変数:
+# - $MAIN_REPO: メインリポジトリのパス
+# - $WORKTREE: 作成されるworktreeのパス
+# - $WORKTREE_NAME: worktree名
