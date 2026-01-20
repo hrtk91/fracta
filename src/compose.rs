@@ -280,6 +280,14 @@ fn rewrite_long_port(
     (new_map, true)
 }
 
+fn sanitize_container_name(name: &str) -> String {
+    // Docker Composeのコンテナ名で使えない文字を置換
+    // `/` を `-` に置換し、連続する `-` を1つにまとめる
+    let sanitized = name.replace('/', "-");
+    let parts: Vec<&str> = sanitized.split('-').filter(|s| !s.is_empty()).collect();
+    parts.join("-")
+}
+
 fn rewrite_container_name(
     value: &Value,
     worktree_name: &str,
@@ -297,7 +305,8 @@ fn rewrite_container_name(
         return None;
     }
 
-    let suffix = format!("-{}", worktree_name);
+    let sanitized_name = sanitize_container_name(worktree_name);
+    let suffix = format!("-{}", sanitized_name);
     if base.ends_with(&suffix) {
         return None;
     }
@@ -567,6 +576,16 @@ mod tests {
     }
 
     #[test]
+    fn test_sanitize_container_name() {
+        assert_eq!(sanitize_container_name("develop3"), "develop3");
+        assert_eq!(sanitize_container_name("feature/new-feature"), "feature-new-feature");
+        assert_eq!(sanitize_container_name("bugfix/issue-123"), "bugfix-issue-123");
+        assert_eq!(sanitize_container_name("feature//double-slash"), "feature-double-slash");
+        assert_eq!(sanitize_container_name("/leading-slash"), "leading-slash");
+        assert_eq!(sanitize_container_name("trailing-slash/"), "trailing-slash");
+    }
+
+    #[test]
     fn test_rewrite_container_name() {
         let mut warnings = Vec::new();
         let value = Value::String("localstack-main".to_string());
@@ -574,6 +593,17 @@ mod tests {
         assert_eq!(
             rewritten,
             Some(Value::String("localstack-main-develop3".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_rewrite_container_name_with_slash() {
+        let mut warnings = Vec::new();
+        let value = Value::String("localstack-main".to_string());
+        let rewritten = rewrite_container_name(&value, "feature/new-feature", &mut warnings);
+        assert_eq!(
+            rewritten,
+            Some(Value::String("localstack-main-feature-new-feature".to_string()))
         );
     }
 
