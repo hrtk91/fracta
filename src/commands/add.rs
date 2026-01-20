@@ -24,10 +24,12 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         .and_then(|n| n.to_str())
         .context("Failed to get repository name")?;
 
+    // ディレクトリ名として使用するため、nameをサニタイズ
+    let sanitized_name = utils::sanitize_name(name);
     let worktree_path = main_repo
         .parent()
         .context("Failed to get parent directory")?
-        .join(format!("{}-{}", repo_name, name));
+        .join(format!("{}-{}", repo_name, sanitized_name));
 
     let used_offsets: std::collections::HashSet<u16> =
         state.worktrees.iter().map(|wt| wt.port_offset).collect();

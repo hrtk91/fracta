@@ -281,11 +281,8 @@ fn rewrite_long_port(
 }
 
 fn sanitize_container_name(name: &str) -> String {
-    // Docker Composeのコンテナ名で使えない文字を置換
-    // `/` を `-` に置換し、連続する `-` を1つにまとめる
-    let sanitized = name.replace('/', "-");
-    let parts: Vec<&str> = sanitized.split('-').filter(|s| !s.is_empty()).collect();
-    parts.join("-")
+    // utils::sanitize_nameを再利用
+    crate::utils::sanitize_name(name)
 }
 
 fn rewrite_container_name(

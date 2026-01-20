@@ -172,6 +172,16 @@ pub fn is_path_within(parent: &Path, child: &Path) -> bool {
     child.starts_with(&parent)
 }
 
+/// ディレクトリ名やコンテナ名として使用できない文字をサニタイズ
+///
+/// - `/` を `-` に置換
+/// - 連続する `-` を1つにまとめる
+pub fn sanitize_name(name: &str) -> String {
+    let sanitized = name.replace('/', "-");
+    let parts: Vec<&str> = sanitized.split('-').filter(|s| !s.is_empty()).collect();
+    parts.join("-")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +211,16 @@ mod tests {
         let offset = choose_port_offset("feature-A", &used);
         assert!(offset >= 1000 && offset <= 9000);
         assert!(!used.contains(&offset));
+    }
+
+    #[test]
+    fn test_sanitize_name() {
+        assert_eq!(sanitize_name("develop3"), "develop3");
+        assert_eq!(sanitize_name("feature/new-feature"), "feature-new-feature");
+        assert_eq!(sanitize_name("bugfix/issue-123"), "bugfix-issue-123");
+        assert_eq!(sanitize_name("feature//double-slash"), "feature-double-slash");
+        assert_eq!(sanitize_name("/leading-slash"), "leading-slash");
+        assert_eq!(sanitize_name("trailing-slash/"), "trailing-slash");
+        assert_eq!(sanitize_name("normal-name"), "normal-name");
     }
 }
