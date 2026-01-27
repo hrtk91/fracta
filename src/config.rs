@@ -5,11 +5,16 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
     pub compose_base: Option<String>,
+    pub registry_mirror: Option<String>,
 }
 
 impl Config {
     pub fn compose_base(&self) -> &str {
         self.compose_base.as_deref().unwrap_or("docker-compose.yml")
+    }
+
+    pub fn registry_mirror(&self) -> Option<&str> {
+        self.registry_mirror.as_deref()
     }
 }
 

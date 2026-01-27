@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use std::process::Command;
 
 use crate::config;
+use crate::lima::client as lima;
 use crate::state::State;
 use crate::utils;
 
@@ -11,60 +11,89 @@ pub fn execute(name: Option<&str>) -> Result<()> {
     let config = config::load_config(&main_repo)?;
     let state = State::load(&main_repo)?;
 
-    let (worktree_name, worktree_path, port_offset) = match name {
+    let (instance_name, worktree_path, lima_instance, active_forwards) = match name {
         Some(name) => {
-            let worktree = state
-                .find_worktree(name)
-                .ok_or_else(|| anyhow::anyhow!("Worktree '{}' not found", name))?;
-            (worktree.name.as_str(), PathBuf::from(&worktree.path), worktree.port_offset)
+            let instance = state
+                .find_instance(name)
+                .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", name))?;
+            (
+                instance.name.as_str(),
+                PathBuf::from(&instance.path),
+                instance.lima_instance.clone(),
+                instance.active_forwards.clone(),
+            )
         }
         None => {
             let cwd = std::env::current_dir()
                 .context("Failed to get current directory")?;
-            let worktree = state.worktrees.iter().find(|wt| {
-                utils::is_path_within(std::path::Path::new(&wt.path), &cwd)
+            let instance = state.instances.iter().find(|inst| {
+                utils::is_path_within(std::path::Path::new(&inst.path), &cwd)
             });
 
-            let worktree = match worktree {
-                Some(wt) => wt,
-                None => anyhow::bail!("No worktree found for current directory"),
+            let instance = match instance {
+                Some(inst) => inst,
+                None => anyhow::bail!("No instance found for current directory"),
             };
 
-            (worktree.name.as_str(), PathBuf::from(&worktree.path), worktree.port_offset)
+            (
+                instance.name.as_str(),
+                PathBuf::from(&instance.path),
+                instance.lima_instance.clone(),
+                instance.active_forwards.clone(),
+            )
         }
     };
 
     let compose_base = utils::compose_base_path(&config, &worktree_path);
-    let compose_file = utils::compose_generated_path(&worktree_path);
 
-    if !compose_base.exists() {
-        anyhow::bail!("Compose base not found: {}", compose_base.display());
-    }
-    if !compose_file.exists() {
-        anyhow::bail!("Compose file not found: {}", compose_file.display());
-    }
+    // Lima VM の状態を確認
+    let info = lima::info(&lima_instance)?;
 
-    println!("=== docker compose ps: {} (offset {}) ===", worktree_name, port_offset);
+    println!("=== Instance: {} ===", instance_name);
+    println!("Lima VM: {} ({})", lima_instance, info);
+    println!("Worktree: {}", worktree_path.display());
 
-    let output = Command::new("docker")
-        .args([
-            "compose",
-            "--project-directory",
-            worktree_path.to_string_lossy().as_ref(),
-            "-f",
-            compose_file.to_string_lossy().as_ref(),
-            "ps",
-        ])
-        .current_dir(&worktree_path)
-        .output()
-        .context("Failed to execute docker compose ps")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("docker compose ps failed: {}", stderr.trim());
+    // アクティブなポートフォワード
+    if !active_forwards.is_empty() {
+        println!("\nActive port forwards:");
+        println!("{:<12} {:<12} {:<10}", "LOCAL", "REMOTE", "PID");
+        println!("{}", "-".repeat(34));
+        for fwd in &active_forwards {
+            println!(
+                "{:<12} {:<12} {:<10}",
+                fwd.local_port, fwd.remote_port, fwd.pid
+            );
+        }
     }
 
-    println!("{}", String::from_utf8_lossy(&output.stdout));
+    // VM が起動している場合のみ docker compose ps を実行
+    if info == lima::InstanceStatus::Running {
+        if compose_base.exists() {
+            let compose_rel = compose_base
+                .strip_prefix(&worktree_path)
+                .unwrap_or(&compose_base);
+            let compose_path = compose_rel.to_string_lossy();
+            let vm_worktree_path = worktree_path.to_string_lossy();
+
+            println!("\n=== Docker Compose Status ===");
+
+            let _ = lima::shell_interactive(
+                &lima_instance,
+                &[
+                    "bash",
+                    "-c",
+                    &format!(
+                        "cd '{}' && sudo docker compose -f '{}' ps",
+                        vm_worktree_path, compose_path
+                    ),
+                ],
+            );
+        } else {
+            println!("\nCompose base not found: {}", compose_base.display());
+        }
+    } else {
+        println!("\nLima VM is not running. Start it with: fracta up {}", instance_name);
+    }
 
     Ok(())
 }

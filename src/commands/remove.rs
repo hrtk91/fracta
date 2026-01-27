@@ -4,6 +4,8 @@ use std::process::Command;
 
 use crate::config;
 use crate::hooks::{self, HookContext};
+use crate::lima::client as lima;
+use crate::lima::ssh;
 use crate::state::State;
 use crate::utils;
 
@@ -14,92 +16,110 @@ pub fn execute(name: &str, force: bool) -> Result<()> {
     let config = config::load_config(&main_repo)?;
     let mut state = State::load(&main_repo)?;
 
-    let worktree = state
-        .find_worktree(name)
-        .ok_or_else(|| anyhow::anyhow!("Worktree '{}' not found", name))?;
+    let instance = state
+        .find_instance(name)
+        .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", name))?
+        .clone();
 
-    let worktree_path = PathBuf::from(&worktree.path);
+    let worktree_path = PathBuf::from(&instance.path);
     let compose_base = utils::compose_base_path(&config, &worktree_path);
-    let compose_file = utils::compose_generated_path(&worktree_path);
 
     let hook_ctx = HookContext {
         name: name.to_string(),
         worktree_path: worktree_path.clone(),
         main_repo: main_repo.clone(),
-        port_offset: worktree.port_offset,
+        port_offset: 0,
         compose_base: compose_base.clone(),
-        compose_file: compose_file.clone(),
+        compose_file: compose_base.clone(),
     };
 
     hooks::run_hook("pre_remove", &worktree_path, &hook_ctx)?;
 
-    let compose_missing = !compose_base.exists() || !compose_file.exists();
-    if compose_missing {
-        if force {
-            if !compose_base.exists() {
-                eprintln!("Warning: Compose base not found: {}", compose_base.display());
+    // アクティブなポートフォワードを停止
+    if !instance.active_forwards.is_empty() {
+        println!("Stopping port forwards...");
+        for fwd in &instance.active_forwards {
+            if ssh::is_process_alive(fwd.pid) {
+                let _ = ssh::stop_forward(fwd.pid);
             }
-            if !compose_file.exists() {
-                eprintln!("Warning: Compose file not found: {}", compose_file.display());
-            }
-            eprintln!("Warning: Skipping docker compose down (force enabled)");
-        } else {
-            if !compose_base.exists() {
-                anyhow::bail!("Compose base not found: {}", compose_base.display());
-            }
-            anyhow::bail!("Compose file not found: {}", compose_file.display());
         }
-    } else {
-        let down_output = Command::new("docker")
-            .args([
-                "compose",
-                "--project-directory",
-                worktree_path.to_string_lossy().as_ref(),
-                "-f",
-                compose_file.to_string_lossy().as_ref(),
-                "down",
-            ])
-            .current_dir(&worktree_path)
-            .output()
-            .context("Failed to execute docker compose down")?;
+    }
 
-        if !down_output.status.success() {
-            let stderr = String::from_utf8_lossy(&down_output.stderr);
-            if force {
-                eprintln!("Warning: docker compose down failed: {}", stderr.trim());
-            } else {
-                anyhow::bail!("docker compose down failed: {}", stderr.trim());
+    // Lima VM が起動している場合は docker compose down を実行
+    let info = lima::info(&instance.lima_instance)?;
+    if info == lima::InstanceStatus::Running {
+        if compose_base.exists() {
+            let compose_rel = compose_base
+                .strip_prefix(&worktree_path)
+                .unwrap_or(&compose_base);
+            let compose_path = compose_rel.to_string_lossy();
+            let vm_worktree_path = worktree_path.to_string_lossy();
+
+            println!("Running docker compose down in VM...");
+            let output = lima::shell(
+                &instance.lima_instance,
+                &[
+                    "bash",
+                    "-c",
+                    &format!(
+                        "cd '{}' && sudo docker compose -f '{}' down 2>/dev/null || true",
+                        vm_worktree_path, compose_path
+                    ),
+                ],
+            );
+
+            if let Err(e) = output {
+                if force {
+                    eprintln!("Warning: docker compose down failed: {}", e);
+                } else {
+                    return Err(e);
+                }
             }
-        } else {
-            println!("{}", String::from_utf8_lossy(&down_output.stdout));
+        }
+    }
+
+    // Lima VM を削除
+    if info != lima::InstanceStatus::NotFound {
+        println!("Deleting Lima VM: {}...", instance.lima_instance);
+        if let Err(e) = lima::delete(&instance.lima_instance) {
+            if force {
+                eprintln!("Warning: Failed to delete Lima VM: {}", e);
+            } else {
+                return Err(e);
+            }
         }
     }
 
     hooks::run_hook("post_remove", &worktree_path, &hook_ctx)?;
 
-    if compose_file.exists() {
-        std::fs::remove_file(&compose_file)
-            .context("Failed to remove compose file")?;
-    }
-
+    // .fracta ディレクトリを削除
     let worktree_fracta_dir = utils::fracta_worktree_dir(&worktree_path);
     if worktree_fracta_dir.exists() {
-        let _ = std::fs::remove_dir(&worktree_fracta_dir);
+        let _ = std::fs::remove_dir_all(&worktree_fracta_dir);
     }
 
+    // Git worktree を削除
+    println!("Removing git worktree...");
     let output = Command::new("git")
-        .args(["worktree", "remove", worktree_path.to_string_lossy().as_ref()])
+        .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
         .current_dir(&main_repo)
         .output()
         .context("Failed to execute git worktree remove")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git worktree remove failed: {}", stderr.trim());
+        if force {
+            eprintln!("Warning: git worktree remove failed: {}", stderr.trim());
+        } else {
+            anyhow::bail!("git worktree remove failed: {}", stderr.trim());
+        }
     }
 
-    state.remove_worktree(name);
+    // 状態を更新
+    state.remove_instance(name);
     state.save(&main_repo)?;
+
+    println!("=== Worktree '{}' removed successfully ===", name);
 
     Ok(())
 }

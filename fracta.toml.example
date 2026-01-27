@@ -1,37 +1,13 @@
-# fracta設定ファイルサンプル
-# このファイルを fracta.local.toml にコピーして使用してください
+# fracta 設定ファイルサンプル
+# このファイルを fracta.toml にコピーして使用してください
 #
-# 使用方法: cp fracta.toml.example fracta.local.toml
+# 使用方法: cp fracta.toml.example fracta.toml
 
-[setup]
-# worktree作成時に自動実行されるコマンド
-commands = [
-  # .envファイルをメインリポジトリからコピー（backend）
-  {
-    run = "cp $MAIN_REPO/backend/.env backend/.env",
-    description = "Copy .env file (backend)",
-    working_dir = ".",
-    optional = true  # ファイルが存在しなくてもエラーにしない
-  },
+# docker compose の base ファイルパス
+# worktree からの相対パス、または絶対パスを指定できます。
+# 例: "docker-compose.yml"
+compose_base = "docker-compose.yml"
 
-  # .envファイルをメインリポジトリからコピー（frontend）
-  {
-    run = "cp $MAIN_REPO/frontend/.env frontend/.env",
-    description = "Copy .env file (frontend)",
-    working_dir = ".",
-    optional = true  # ファイルが存在しなくてもエラーにしない
-  },
-
-  # その他のセットアップコマンド例
-  # {
-  #   run = "npm install",
-  #   description = "Install npm dependencies",
-  #   working_dir = "frontend",
-  #   optional = false
-  # },
-]
-
-# 利用可能な環境変数:
-# - $MAIN_REPO: メインリポジトリのパス
-# - $WORKTREE: 作成されるworktreeのパス
-# - $WORKTREE_NAME: worktree名
+# Docker registry mirror (Lima VM 内で利用)
+# 例: "http://host.lima.internal:5000"
+# registry_mirror = "http://host.lima.internal:5000"

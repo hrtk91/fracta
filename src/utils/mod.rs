@@ -1,49 +1,8 @@
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::config::Config;
-
-/// worktree名からポートオフセットを計算
-///
-/// - main: offset=0
-/// - worktree: 1000..9000 (1000刻み)
-pub fn calculate_port_offset(name: &str) -> u16 {
-    if name == "main" || name.is_empty() {
-        return 0;
-    }
-
-    let mut hasher = DefaultHasher::new();
-    name.hash(&mut hasher);
-    let hash = hasher.finish();
-
-    let offset_multiplier = ((hash % 9) + 1) as u16;
-    offset_multiplier * 1000
-}
-
-pub fn choose_port_offset(name: &str, used_offsets: &HashSet<u16>) -> u16 {
-    let base = calculate_port_offset(name);
-    if base == 0 {
-        return 0;
-    }
-
-    let start_index = ((base / 1000).saturating_sub(1)) as usize;
-    let candidates: Vec<u16> = (1..=9).map(|i| i * 1000).collect();
-
-    for i in 0..candidates.len() {
-        let idx = (start_index + i) % candidates.len();
-        let candidate = candidates[idx];
-        if !used_offsets.contains(&candidate) {
-            return candidate;
-        }
-    }
-
-    base
-}
 
 pub fn resolve_main_repo() -> Result<PathBuf> {
     let output = Command::new("git")
@@ -93,72 +52,6 @@ pub fn compose_generated_path(worktree_path: &Path) -> PathBuf {
     fracta_worktree_dir(worktree_path).join("compose.generated.yml")
 }
 
-pub fn load_compose_env(compose_base: &Path) -> Result<HashMap<String, String>> {
-    let mut env_map: HashMap<String, String> = std::env::vars().collect();
-
-    let dotenv_path = compose_base
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(".env");
-
-    if dotenv_path.exists() {
-        let content = std::fs::read_to_string(&dotenv_path)
-            .context(format!("Failed to read {}", dotenv_path.display()))?;
-        let env_file = parse_dotenv(&content);
-        for (key, value) in env_file {
-            env_map.entry(key).or_insert(value);
-        }
-    }
-
-    Ok(env_map)
-}
-
-fn parse_dotenv(content: &str) -> HashMap<String, String> {
-    let mut env_map = HashMap::new();
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        let (key, value) = match line.split_once('=') {
-            Some((key, value)) => (key.trim(), value.trim()),
-            None => continue,
-        };
-
-        if key.is_empty() {
-            continue;
-        }
-
-        let value = strip_quotes(value);
-        env_map.insert(key.to_string(), value.to_string());
-    }
-
-    env_map
-}
-
-fn strip_quotes(value: &str) -> &str {
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2 {
-        let first = bytes[0];
-        let last = bytes[bytes.len() - 1];
-        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            return &value[1..value.len() - 1];
-        }
-    }
-    value
-}
-
-pub fn ensure_parent_dir(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .context(format!("Failed to create directory {}", parent.display()))?;
-    }
-    Ok(())
-}
-
 pub fn is_path_within(parent: &Path, child: &Path) -> bool {
     let parent = match parent.canonicalize() {
         Ok(path) => path,
@@ -185,33 +78,6 @@ pub fn sanitize_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_calculate_port_offset() {
-        assert_eq!(calculate_port_offset("main"), 0);
-        assert_eq!(calculate_port_offset(""), 0);
-
-        let offset_a = calculate_port_offset("feature-A");
-        assert!(offset_a >= 1000 && offset_a <= 9000);
-        assert_eq!(offset_a % 1000, 0);
-
-        assert_eq!(
-            calculate_port_offset("feature-A"),
-            calculate_port_offset("feature-A")
-        );
-    }
-
-    #[test]
-    fn test_choose_port_offset() {
-        use std::collections::HashSet;
-
-        let mut used = HashSet::new();
-        used.insert(1000);
-        used.insert(2000);
-        let offset = choose_port_offset("feature-A", &used);
-        assert!(offset >= 1000 && offset <= 9000);
-        assert!(!used.contains(&offset));
-    }
 
     #[test]
     fn test_sanitize_name() {
