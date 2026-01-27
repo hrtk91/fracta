@@ -5,14 +5,12 @@ use crate::lima::ssh;
 use crate::state::{PortForward, State};
 use crate::utils;
 
-pub fn execute(name: &str, local_port: u16, remote_port: u16) -> Result<()> {
+pub fn execute(name: Option<&str>, local_port: u16, remote_port: u16) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
     let mut state = State::load(&main_repo)?;
 
-    let instance = state
-        .find_instance(name)
-        .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", name))?
-        .clone();
+    let instance = state.resolve_instance(name)?.clone();
+    let name = instance.name.as_str();
 
     // Lima VM の状態を確認
     let info = lima::info(&instance.lima_instance)?;

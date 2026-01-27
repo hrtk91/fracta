@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::config;
 use crate::hooks::{self, HookContext};
 use crate::lima::client as lima;
+use crate::lima::template;
 use crate::state::State;
 use crate::utils;
 
@@ -28,11 +29,18 @@ pub fn execute(name: Option<&str>) -> Result<()> {
     let info = lima::info(&instance.lima_instance)?;
     match info {
         lima::InstanceStatus::NotFound => {
-            anyhow::bail!(
-                "Lima VM '{}' not found. Run 'fracta add {}' first.",
-                instance.lima_instance,
-                instance_name
+            println!(
+                "Lima VM '{}' not found. Creating a new VM...",
+                instance.lima_instance
             );
+
+            let mut tmpl_cfg = template::TemplateConfig::new(&worktree_path.to_string_lossy());
+            tmpl_cfg.registry_mirror = config.registry_mirror.clone();
+            let temp_template = template::create_temp_template(&tmpl_cfg)?;
+
+            lima::create(temp_template.path(), &instance.lima_instance)?;
+            println!("Starting Lima VM: {}...", instance.lima_instance);
+            lima::start(&instance.lima_instance)?;
         }
         lima::InstanceStatus::Stopped => {
             println!("Starting Lima VM: {}...", instance.lima_instance);

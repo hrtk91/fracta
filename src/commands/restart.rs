@@ -7,16 +7,15 @@ use crate::lima::client as lima;
 use crate::state::State;
 use crate::utils;
 
-pub fn execute(name: &str) -> Result<()> {
-    println!("=== Restarting worktree: {} ===", name);
-
+pub fn execute(name: Option<&str>) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
     let config = config::load_config(&main_repo)?;
     let state = State::load(&main_repo)?;
 
-    let instance = state
-        .find_instance(name)
-        .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", name))?;
+    let instance = state.resolve_instance(name)?;
+    let name = instance.name.as_str();
+
+    println!("=== Restarting worktree: {} ===", name);
 
     let worktree_path = PathBuf::from(&instance.path);
     let compose_base = utils::compose_base_path(&config, &worktree_path);

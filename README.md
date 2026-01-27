@@ -75,7 +75,7 @@ fracta add feature-new2 -b      # HEAD から作成
 
 **処理内容：**
 - git worktree 作成（既存ブランチまたは新規ブランチ）
-- Lima VM 作成・起動
+- Lima VM 作成（起動は `up` で実行）
 - `.fracta/state.json` に登録
 
 #### `up [name]`
@@ -102,12 +102,14 @@ fracta down
 **オプション：**
 - `--vm`: Lima VM も停止
 
-#### `restart <name>`
+#### `restart [name]`
 
 worktree を再起動します。
 
 ```bash
 fracta restart feature-A
+# worktree 内なら省略可能
+fracta restart
 ```
 
 #### `remove <name>`
@@ -122,6 +124,8 @@ fracta rm feature-A
 
 **オプション：**
 - `--force`: エラーを無視して削除を続行
+- `--vm-only`: Lima VM のみ削除（worktreeは残す）
+- `--worktree-only`: worktreeのみ削除（VMは残す）
 
 #### `ps [name]`
 
@@ -160,22 +164,73 @@ Lima VM にシェル接続します。
 fracta shell feature-A
 ```
 
-#### `forward <name> <local_port> <remote_port>`
+**オプション（limactl shell と同じインターフェース）**:
+- `--shell <PATH>`: shell interpreter（例: `/bin/bash`）
+- `--workdir <PATH>`: working directory
+- `--tty <true|false>`: TTY を明示
+
+```bash
+fracta shell feature-A -- ls -la
+fracta shell feature-A --shell /bin/bash --workdir /home -- pwd
+fracta shell feature-A --tty false -- ls -la
+```
+
+#### `forward [name] <local_port> <remote_port>`
 
 SSH ポートフォワードを開始します。
 
 ```bash
 fracta forward feature-A 18080 8080
+# worktree 内なら省略可能
+fracta forward 18080 8080
 ```
 
-#### `unforward <name> [local_port]`
+#### `unforward [name] [local_port]`
 
 SSH ポートフォワードを停止します。
 
 ```bash
 fracta unforward feature-A 18080
 fracta unforward feature-A --all
+# worktree 内なら省略可能
+fracta unforward 18080
 ```
+
+## 🧦 SOCKS5 プロキシ + Playwright
+
+`fracta` は Lima VM への SSH ダイナミックフォワード（SOCKS5）を提供します。  
+これにより VM 内の任意のポートへ、ブラウザ/Playwright からまとめてアクセスできます。
+
+### 前提
+
+- Node.js（`node` コマンド）
+- Playwright（ホスト側にインストール済み）
+  - 例: `npm i -g playwright` または `npm i -D playwright`
+
+### proxy
+
+```bash
+# SOCKS5 を開始（ポート自動割当: 1080-1099）
+fracta proxy feature-A
+
+# ポート指定
+fracta proxy feature-A --port 1081
+```
+
+### open / close
+
+```bash
+# Playwright で Chrome を起動（SOCKS5 経由）
+fracta open feature-A --url http://localhost:12901
+
+# Firefox で起動
+fracta open feature-A --browser firefox
+
+# 停止
+fracta close feature-A
+```
+
+> `proxy/open/close` は `name` 省略時、現在ディレクトリの worktree を対象にします。
 
 ## ⚙️ 設定ファイル（fracta.toml）
 

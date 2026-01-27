@@ -112,6 +112,10 @@ provision:
         usermod -aG docker "{{{{.User}}}}"
       fi
 
+      # Allow passwordless sudo for the Lima user (development convenience)
+      echo "{{{{.User}}}} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/fracta-user
+      chmod 0440 /etc/sudoers.d/fracta-user
+
       # Install docker-compose plugin if not present
       if ! docker compose version &> /dev/null; then
         DOCKER_CONFIG=${{DOCKER_CONFIG:-/usr/local/lib/docker}}

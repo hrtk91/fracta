@@ -14,6 +14,21 @@ pub struct PortForward {
     pub pid: u32,
 }
 
+/// SOCKS5 プロキシ情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyForward {
+    pub local_port: u16,
+    pub pid: u32,
+}
+
+/// Playwright ブラウザ起動情報
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserSession {
+    pub browser: String,
+    pub url: String,
+    pub pid: u32,
+}
+
 /// v2: Lima 統合版の Worktree 状態
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
@@ -23,6 +38,10 @@ pub struct Instance {
     pub lima_instance: String,
     #[serde(default)]
     pub active_forwards: Vec<PortForward>,
+    #[serde(default)]
+    pub active_proxy: Option<ProxyForward>,
+    #[serde(default)]
+    pub active_browser: Option<BrowserSession>,
 }
 
 /// v2: Lima 統合版の状態
@@ -161,6 +180,26 @@ impl StateV2 {
         Ok(())
     }
 
+    /// SOCKS5 プロキシを追加
+    pub fn add_proxy(&mut self, instance_name: &str, proxy: ProxyForward) -> Result<()> {
+        self.port_allocations.insert(proxy.local_port, instance_name.to_string());
+
+        let instance = self.find_instance_mut(instance_name)
+            .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
+
+        instance.active_proxy = Some(proxy);
+        Ok(())
+    }
+
+    /// Playwright ブラウザ起動情報を追加
+    pub fn add_browser(&mut self, instance_name: &str, session: BrowserSession) -> Result<()> {
+        let instance = self.find_instance_mut(instance_name)
+            .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
+
+        instance.active_browser = Some(session);
+        Ok(())
+    }
+
     /// ポートフォワードを削除
     pub fn remove_forward(&mut self, instance_name: &str, local_port: u16) -> Result<Option<PortForward>> {
         // まずポート割り当てを削除
@@ -178,6 +217,27 @@ impl StateV2 {
         }
 
         Ok(None)
+    }
+
+    /// SOCKS5 プロキシを削除
+    pub fn remove_proxy(&mut self, instance_name: &str) -> Result<Option<ProxyForward>> {
+        let instance = self.find_instance_mut(instance_name)
+            .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
+
+        if let Some(proxy) = instance.active_proxy.take() {
+            self.port_allocations.remove(&proxy.local_port);
+            return Ok(Some(proxy));
+        }
+
+        Ok(None)
+    }
+
+    /// Playwright ブラウザ起動情報を削除
+    pub fn remove_browser(&mut self, instance_name: &str) -> Result<Option<BrowserSession>> {
+        let instance = self.find_instance_mut(instance_name)
+            .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
+
+        Ok(instance.active_browser.take())
     }
 
     /// 全てのポートフォワードをクリア
@@ -213,6 +273,8 @@ fn migrate_v1_to_v2(v1: StateV1) -> StateV2 {
                 branch: wt.branch,
                 lima_instance: format!("fracta-{}", sanitized),
                 active_forwards: Vec::new(),
+                active_proxy: None,
+                active_browser: None,
             }
         })
         .collect();
@@ -253,6 +315,8 @@ mod tests {
             branch: "main".to_string(),
             lima_instance: "fracta-test".to_string(),
             active_forwards: Vec::new(),
+            active_proxy: None,
+            active_browser: None,
         };
 
         state.add_instance(instance);
@@ -273,6 +337,8 @@ mod tests {
                 branch: "main".to_string(),
                 lima_instance: "fracta-test".to_string(),
                 active_forwards: Vec::new(),
+                active_proxy: None,
+                active_browser: None,
             }],
             port_allocations: HashMap::new(),
         };

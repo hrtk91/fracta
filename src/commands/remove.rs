@@ -9,17 +9,24 @@ use crate::lima::ssh;
 use crate::state::State;
 use crate::utils;
 
-pub fn execute(name: &str, force: bool) -> Result<()> {
-    println!("=== Removing worktree: {} ===", name);
+pub fn execute(
+    name: Option<&str>,
+    force: bool,
+    vm_only: bool,
+    worktree_only: bool,
+) -> Result<()> {
+    if vm_only && worktree_only {
+        anyhow::bail!("Cannot use --vm-only and --worktree-only together");
+    }
 
     let main_repo = utils::resolve_main_repo()?;
     let config = config::load_config(&main_repo)?;
     let mut state = State::load(&main_repo)?;
 
-    let instance = state
-        .find_instance(name)
-        .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", name))?
-        .clone();
+    let instance = state.resolve_instance(name)?.clone();
+    let name = instance.name.as_str();
+
+    println!("=== Removing worktree: {} ===", name);
 
     let worktree_path = PathBuf::from(&instance.path);
     let compose_base = utils::compose_base_path(&config, &worktree_path);
@@ -45,9 +52,12 @@ pub fn execute(name: &str, force: bool) -> Result<()> {
         }
     }
 
+    let remove_vm = !worktree_only;
+    let remove_worktree = !vm_only;
+
     // Lima VM が起動している場合は docker compose down を実行
     let info = lima::info(&instance.lima_instance)?;
-    if info == lima::InstanceStatus::Running {
+    if remove_vm && info == lima::InstanceStatus::Running {
         if compose_base.exists() {
             let compose_rel = compose_base
                 .strip_prefix(&worktree_path)
@@ -79,7 +89,7 @@ pub fn execute(name: &str, force: bool) -> Result<()> {
     }
 
     // Lima VM を削除
-    if info != lima::InstanceStatus::NotFound {
+    if remove_vm && info != lima::InstanceStatus::NotFound {
         println!("Deleting Lima VM: {}...", instance.lima_instance);
         if let Err(e) = lima::delete(&instance.lima_instance) {
             if force {
@@ -92,34 +102,50 @@ pub fn execute(name: &str, force: bool) -> Result<()> {
 
     hooks::run_hook("post_remove", &worktree_path, &hook_ctx)?;
 
-    // .fracta ディレクトリを削除
-    let worktree_fracta_dir = utils::fracta_worktree_dir(&worktree_path);
-    if worktree_fracta_dir.exists() {
-        let _ = std::fs::remove_dir_all(&worktree_fracta_dir);
-    }
+    if remove_worktree {
+        // .fracta ディレクトリを削除
+        let worktree_fracta_dir = utils::fracta_worktree_dir(&worktree_path);
+        if worktree_fracta_dir.exists() {
+            let _ = std::fs::remove_dir_all(&worktree_fracta_dir);
+        }
 
-    // Git worktree を削除
-    println!("Removing git worktree...");
-    let output = Command::new("git")
-        .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
-        .current_dir(&main_repo)
-        .output()
-        .context("Failed to execute git worktree remove")?;
+        // Git worktree を削除
+        println!("Removing git worktree...");
+        let output = Command::new("git")
+            .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
+            .current_dir(&main_repo)
+            .output()
+            .context("Failed to execute git worktree remove")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if force {
-            eprintln!("Warning: git worktree remove failed: {}", stderr.trim());
-        } else {
-            anyhow::bail!("git worktree remove failed: {}", stderr.trim());
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if force {
+                eprintln!("Warning: git worktree remove failed: {}", stderr.trim());
+            } else {
+                anyhow::bail!("git worktree remove failed: {}", stderr.trim());
+            }
         }
     }
 
-    // 状態を更新
-    state.remove_instance(name);
+    if remove_vm && remove_worktree {
+        // 状態を完全に削除
+        state.remove_instance(name);
+    } else if remove_vm {
+        if let Some(inst) = state.find_instance_mut(name) {
+            inst.active_forwards.clear();
+            inst.active_proxy = None;
+            inst.active_browser = None;
+        }
+    }
     state.save(&main_repo)?;
 
-    println!("=== Worktree '{}' removed successfully ===", name);
+    if remove_vm && remove_worktree {
+        println!("=== Worktree '{}' removed successfully ===", name);
+    } else if remove_vm {
+        println!("=== VM for '{}' removed successfully ===", name);
+    } else {
+        println!("=== Worktree '{}' removed successfully (VM preserved) ===", name);
+    }
 
     Ok(())
 }

@@ -109,19 +109,6 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         return Err(e);
     }
 
-    // Lima VM を起動
-    println!("Starting Lima VM: {}...", lima_instance);
-    if let Err(e) = lima::start(&lima_instance) {
-        // 失敗した場合は VM と worktree を削除
-        eprintln!("Failed to start Lima VM, cleaning up...");
-        let _ = lima::delete(&lima_instance);
-        let _ = Command::new("git")
-            .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
-            .current_dir(&main_repo)
-            .output();
-        return Err(e);
-    }
-
     // 状態を保存
     let instance = Instance {
         name: name.to_string(),
@@ -129,6 +116,8 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         branch: name.to_string(),
         lima_instance: lima_instance.clone(),
         active_forwards: Vec::new(),
+        active_proxy: None,
+        active_browser: None,
     };
 
     state.add_instance(instance);
@@ -140,7 +129,7 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
     println!("  Worktree: {}", worktree_path.display());
     println!("  Lima VM:  {}", lima_instance);
     println!("\nNext steps:");
-    println!("  fracta up {}     - Start docker compose in VM", name);
+    println!("  fracta up {}     - Start VM and docker compose", name);
     println!("  fracta shell {}  - Connect to VM shell", name);
 
     Ok(())

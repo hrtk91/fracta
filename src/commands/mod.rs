@@ -1,11 +1,16 @@
 pub mod add;
+pub mod close;
 pub mod down;
 pub mod forward;
 pub mod ls;
+pub mod open;
 pub mod ports;
 pub mod ps;
+pub mod proxy;
+pub mod proxies;
 pub mod remove;
 pub mod restart;
 pub mod shell;
 pub mod unforward;
+pub mod unproxy;
 pub mod up;
