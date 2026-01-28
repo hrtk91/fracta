@@ -132,11 +132,27 @@ provision:
         apt-get install -y --no-install-recommends nodejs npm
       fi
 
+      # Install Japanese fonts (Noto)
+      if ! command -v fc-list &> /dev/null; then
+        apt-get update
+        apt-get install -y --no-install-recommends fontconfig
+      fi
+      if ! fc-list | grep -qi "Noto"; then
+        apt-get update
+        apt-get install -y --no-install-recommends \
+          fonts-noto \
+          fonts-noto-cjk \
+          fonts-noto-color-emoji
+        fc-cache -f -v
+      fi
+
       # Install agent-browser and Chromium dependencies
       if ! command -v agent-browser &> /dev/null; then
         npm install -g agent-browser
-        agent-browser install --with-deps
       fi
+
+      # Install browser binaries via agent-browser (uses Playwright under the hood)
+      agent-browser install --with-deps
 
       # Install uv (official installer)
       if ! command -v uv &> /dev/null; then
