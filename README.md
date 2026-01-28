@@ -41,6 +41,9 @@ fracta add feature-A
 # 2. VM内で docker compose を起動（VMが停止中なら自動起動）
 fracta up feature-A
 
+# 画像同期をスキップ
+fracta up feature-A --no-sync-images
+
 # 3. VM 内で公開されているポートを確認
 fracta ports feature-A
 

@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod hooks;
 mod lima;
+mod images;
 mod state;
 mod utils;
 
@@ -31,6 +32,10 @@ enum Commands {
     Up {
         /// worktree 名（省略時は現在ディレクトリの worktree）
         name: Option<String>,
+
+        /// 事前のイメージ同期を無効化
+        #[arg(long)]
+        no_sync_images: bool,
     },
 
     /// worktree を再起動
@@ -182,8 +187,8 @@ fn main() {
         Commands::Add { name, base_branch } => {
             commands::add::execute(&name, base_branch)
         }
-        Commands::Up { name } => {
-            commands::up::execute(name.as_deref())
+        Commands::Up { name, no_sync_images } => {
+            commands::up::execute(name.as_deref(), no_sync_images)
         }
         Commands::Restart { name } => {
             commands::restart::execute(name.as_deref())

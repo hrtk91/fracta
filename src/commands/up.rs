@@ -3,12 +3,13 @@ use std::path::PathBuf;
 
 use crate::config;
 use crate::hooks::{self, HookContext};
+use crate::images;
 use crate::lima::client as lima;
 use crate::lima::template;
 use crate::state::State;
 use crate::utils;
 
-pub fn execute(name: Option<&str>) -> Result<()> {
+pub fn execute(name: Option<&str>, no_sync_images: bool) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
     let config = config::load_config(&main_repo)?;
     let state = State::load(&main_repo)?;
@@ -66,6 +67,18 @@ pub fn execute(name: Option<&str>) -> Result<()> {
     };
 
     hooks::run_hook("pre_up", &worktree_path, &hook_ctx)?;
+
+    if !no_sync_images {
+        println!("Syncing images to VM...");
+        let images = images::collect_compose_images(&compose_base, &worktree_path)?;
+        if images.is_empty() {
+            println!("No images found to sync.");
+        } else {
+            images::sync_images_to_vm(&instance.lima_instance, &images)?;
+        }
+    } else {
+        println!("Image sync skipped (--no-sync-images).");
+    }
 
     // Lima VM 内で docker compose up を実行
     println!("Running docker compose up in VM...");
