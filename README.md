@@ -244,6 +244,8 @@ compose_base = "docker-compose.yml"  # デフォルト値
 [hooks]
 # post_up = "vm: agent-browser install --with-deps"
 # post_up = "vm: npm install -g agent-browser && agent-browser install --with-deps"
+# post_up = "vm: sudo apt-get update && sudo apt-get install -y --no-install-recommends curl ca-certificates && curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER"
+# post_up = "vm: sudo apt-get update && sudo apt-get install -y --no-install-recommends fontconfig fonts-noto fonts-noto-cjk fonts-noto-color-emoji && fc-cache -f -v"
 ```
 
 - `compose_base` は worktree からの相対パス、または絶対パスを指定できます。
@@ -264,6 +266,18 @@ compose_base = "docker-compose.yml"  # デフォルト値
 - `pre_down`, `post_down` - 停止前後
 - `pre_remove`, `post_remove` - 削除前後
 
+### Hooksの実行タイミング
+
+- `post_add` は **VM作成後** だが **VM起動前**
+- `pre_up` は **VM起動後**（compose up の前）
+- `post_up` は **compose up 後**
+- `pre_restart` は **VM内の `docker compose restart` 前**
+- `post_restart` は **VM内の `docker compose restart` 後**
+- `pre_down` は **VM内の `docker compose down` 前**
+- `post_down` は **VM内の `docker compose down` 後**（VM停止はその後）
+- `pre_remove` は **worktree/VM削除前**
+- `post_remove` は **worktree/VM削除後**
+
 ### 環境変数
 
 - `FRACTA_NAME` - worktree名
@@ -272,6 +286,34 @@ compose_base = "docker-compose.yml"  # デフォルト値
 - `PORT_OFFSET` - 互換用（v2では常に 0）
 - `COMPOSE_BASE` - compose base ファイルのパス
 - `COMPOSE_OVERRIDE` - v2 では `COMPOSE_BASE` と同じ
+
+## 📦 カスタムイメージ作成の手引き
+
+### 目的
+VM起動を速くするには、**初回の pull/build を減らす**のが効果的です。  
+`fracta` ではホスト側のイメージを VM に同期できるため、**ホストでビルド→VMへ同期**の流れが有効です。
+
+### 基本手順（ホストでビルド → VMへ同期）
+1) ホストでイメージを作成
+```bash
+docker compose build
+# または
+docker build -t your-image:tag .
+```
+
+2) `fracta up` で VMへ同期
+```bash
+fracta up <worktree>
+```
+`fracta up` は compose の参照イメージを検出し、VMへ `docker load` で同期します。
+
+### さらに早くする場合（任意）
+- 使うイメージを固定タグにする（毎回 pull しない）
+- 変更がないイメージはホスト側でビルドせず再利用
+
+### 注意
+- VMを削除するとキャッシュも消えます。**VMを残す運用が最速**です。
+- hookで重いセットアップを入れると起動が遅くなるため、必要最小限に。
 
 ## 🔌 ポートフォワード
 
