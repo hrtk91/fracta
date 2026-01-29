@@ -10,7 +10,10 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "fracta")]
-#[command(about = "Worktree + Lima VM + docker compose helper CLI", long_about = None)]
+#[command(
+    about = "Worktree + Lima VM + docker compose helper CLI",
+    long_about = "Worktree + Lima VM + docker compose helper CLI\n\nDocs/README:\n  https://github.com/hrtk91/fracta\n\nConfig:\n  fracta.toml, fracta.*.toml (main repo -> worktree, later files override)\n  hooks: use \"vm:\" or \"limactl:\" prefix to run inside VM"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

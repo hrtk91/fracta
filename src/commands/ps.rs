@@ -8,7 +8,6 @@ use crate::utils;
 
 pub fn execute(name: Option<&str>) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
-    let config = config::load_config(&main_repo)?;
     let state = State::load(&main_repo)?;
 
     let (instance_name, worktree_path, lima_instance, active_forwards) = match name {
@@ -44,6 +43,7 @@ pub fn execute(name: Option<&str>) -> Result<()> {
         }
     };
 
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
     let compose_base = utils::compose_base_path(&config, &worktree_path);
 
     // Lima VM の状態を確認

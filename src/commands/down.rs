@@ -10,7 +10,6 @@ use crate::utils;
 
 pub fn execute(name: Option<&str>, stop_vm: bool) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
-    let config = config::load_config(&main_repo)?;
     let mut state = State::load(&main_repo)?;
 
     let instance = state.resolve_instance(name)?.clone();
@@ -19,6 +18,7 @@ pub fn execute(name: Option<&str>, stop_vm: bool) -> Result<()> {
     println!("=== Stopping worktree: {} ===", instance_name);
 
     let worktree_path = PathBuf::from(&instance.path);
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
     let compose_base = utils::compose_base_path(&config, &worktree_path);
 
     if !compose_base.exists() {
@@ -34,7 +34,7 @@ pub fn execute(name: Option<&str>, stop_vm: bool) -> Result<()> {
         compose_file: compose_base.clone(),
     };
 
-    hooks::run_hook("pre_down", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("pre_down", &worktree_path, &hook_ctx, &config)?;
 
     // Lima VM が起動しているか確認
     let info = lima::info(&instance.lima_instance)?;
@@ -92,7 +92,7 @@ pub fn execute(name: Option<&str>, stop_vm: bool) -> Result<()> {
         println!("Lima VM '{}' is not running.", instance.lima_instance);
     }
 
-    hooks::run_hook("post_down", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("post_down", &worktree_path, &hook_ctx, &config)?;
 
     println!("=== docker compose down completed ===");
 

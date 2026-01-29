@@ -20,7 +20,6 @@ pub fn execute(
     }
 
     let main_repo = utils::resolve_main_repo()?;
-    let config = config::load_config(&main_repo)?;
     let mut state = State::load(&main_repo)?;
 
     let instance = state.resolve_instance(name)?.clone();
@@ -29,6 +28,7 @@ pub fn execute(
     println!("=== Removing worktree: {} ===", name);
 
     let worktree_path = PathBuf::from(&instance.path);
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
     let compose_base = utils::compose_base_path(&config, &worktree_path);
 
     let hook_ctx = HookContext {
@@ -40,7 +40,7 @@ pub fn execute(
         compose_file: compose_base.clone(),
     };
 
-    hooks::run_hook("pre_remove", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("pre_remove", &worktree_path, &hook_ctx, &config)?;
 
     // アクティブなポートフォワードを停止
     if !instance.active_forwards.is_empty() {
@@ -100,7 +100,7 @@ pub fn execute(
         }
     }
 
-    hooks::run_hook("post_remove", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("post_remove", &worktree_path, &hook_ctx, &config)?;
 
     if remove_worktree {
         // .fracta ディレクトリを削除

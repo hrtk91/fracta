@@ -2,12 +2,23 @@
 # このファイルを fracta.toml にコピーして使用してください
 #
 # 使用方法: cp fracta.toml.example fracta.toml
+#
+# 追加ファイル: fracta.*.toml も読み込みます（後の設定が上書き）。
 
 # docker compose の base ファイルパス
 # worktree からの相対パス、または絶対パスを指定できます。
 # 例: "docker-compose.yml"
 compose_base = "docker-compose.yml"
 
-# Docker registry mirror (Lima VM 内で利用)
-# 例: "http://host.lima.internal:5000"
-# registry_mirror = "http://host.lima.internal:5000"
+# Hooks (optional)
+[hooks]
+# pre_add = ""
+# post_add = ""
+# pre_up = ""
+# post_up = "vm: npm install -g agent-browser && agent-browser install --with-deps"
+# pre_down = ""
+# post_down = ""
+# pre_remove = ""
+# post_remove = ""
+# pre_restart = ""
+# post_restart = ""

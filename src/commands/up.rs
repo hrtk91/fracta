@@ -11,7 +11,6 @@ use crate::utils;
 
 pub fn execute(name: Option<&str>, no_sync_images: bool) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
-    let config = config::load_config(&main_repo)?;
     let state = State::load(&main_repo)?;
 
     let instance = state.resolve_instance(name)?;
@@ -20,6 +19,7 @@ pub fn execute(name: Option<&str>, no_sync_images: bool) -> Result<()> {
     println!("=== Starting worktree: {} ===", instance_name);
 
     let worktree_path = PathBuf::from(&instance.path);
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
     let compose_base = utils::compose_base_path(&config, &worktree_path);
 
     if !compose_base.exists() {
@@ -35,8 +35,7 @@ pub fn execute(name: Option<&str>, no_sync_images: bool) -> Result<()> {
                 instance.lima_instance
             );
 
-            let mut tmpl_cfg = template::TemplateConfig::new(&worktree_path.to_string_lossy());
-            tmpl_cfg.registry_mirror = config.registry_mirror.clone();
+            let tmpl_cfg = template::TemplateConfig::new(&worktree_path.to_string_lossy());
             let temp_template = template::create_temp_template(&tmpl_cfg)?;
 
             lima::create(temp_template.path(), &instance.lima_instance)?;
@@ -66,7 +65,7 @@ pub fn execute(name: Option<&str>, no_sync_images: bool) -> Result<()> {
         compose_file: compose_base.clone(), // v2 では生成ファイル不使用
     };
 
-    hooks::run_hook("pre_up", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("pre_up", &worktree_path, &hook_ctx, &config)?;
 
     if !no_sync_images {
         println!("Syncing images to VM...");
@@ -103,7 +102,7 @@ pub fn execute(name: Option<&str>, no_sync_images: bool) -> Result<()> {
         anyhow::bail!("docker compose up failed in VM");
     }
 
-    hooks::run_hook("post_up", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("post_up", &worktree_path, &hook_ctx, &config)?;
 
     // コンテナの状態を表示
     println!("\nContainer status:");

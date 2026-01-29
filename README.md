@@ -237,15 +237,20 @@ fracta close feature-A
 
 ## ⚙️ 設定ファイル（fracta.toml）
 
-プロジェクトルートに `fracta.toml` を作成すると、compose base ファイルのパスや registry mirror を指定できます。
+プロジェクトルートまたは worktree ルートに `fracta.toml` を作成すると、compose base ファイルのパスや hooks を指定できます。
 
 ```toml
 compose_base = "docker-compose.yml"  # デフォルト値
-registry_mirror = "http://host.lima.internal:5000"
+[hooks]
+# post_up = "vm: agent-browser install --with-deps"
+# post_up = "vm: npm install -g agent-browser && agent-browser install --with-deps"
 ```
 
 - `compose_base` は worktree からの相対パス、または絶対パスを指定できます。
-- `registry_mirror` は `fracta add` 時に作成される VM テンプレートに反映されます。
+- `hooks` は `pre_*` / `post_*` の各タイミングで実行されます。
+  - `vm:` または `limactl:` のプレフィックスを付けると、VM内で実行します。
+- `fracta.*.toml` も読み込みます（`fracta.toml` → `fracta.*.toml` の順で、後の設定が上書き）。
+- 読み込み順は「メインリポジトリ → worktree」です。
 
 ## 🔗 Hooks
 

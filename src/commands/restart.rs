@@ -9,7 +9,6 @@ use crate::utils;
 
 pub fn execute(name: Option<&str>) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
-    let config = config::load_config(&main_repo)?;
     let state = State::load(&main_repo)?;
 
     let instance = state.resolve_instance(name)?;
@@ -18,6 +17,7 @@ pub fn execute(name: Option<&str>) -> Result<()> {
     println!("=== Restarting worktree: {} ===", name);
 
     let worktree_path = PathBuf::from(&instance.path);
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
     let compose_base = utils::compose_base_path(&config, &worktree_path);
 
     if !compose_base.exists() {
@@ -43,7 +43,7 @@ pub fn execute(name: Option<&str>) -> Result<()> {
         compose_file: compose_base.clone(),
     };
 
-    hooks::run_hook("pre_restart", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("pre_restart", &worktree_path, &hook_ctx, &config)?;
 
     // compose ファイルの相対パスを取得
     let compose_rel = compose_base
@@ -70,7 +70,7 @@ pub fn execute(name: Option<&str>) -> Result<()> {
         anyhow::bail!("docker compose restart failed in VM");
     }
 
-    hooks::run_hook("post_restart", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("post_restart", &worktree_path, &hook_ctx, &config)?;
 
     println!("=== docker compose restart completed ===");
 

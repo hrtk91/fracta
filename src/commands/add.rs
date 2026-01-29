@@ -16,7 +16,6 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
     }
 
     let main_repo = utils::resolve_main_repo()?;
-    let config = config::load_config(&main_repo)?;
 
     let mut state = State::load(&main_repo)?;
     if state.find_instance(name).is_some() {
@@ -36,6 +35,8 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         .join(format!("{}-{}", repo_name, sanitized_name));
 
     let lima_instance = lima::instance_name(name);
+
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
 
     // Lima インスタンスが既に存在するか確認
     let info = lima::info(&lima_instance)?;
@@ -59,7 +60,7 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         compose_file: compose_file.clone(),
     };
 
-    hooks::run_hook("pre_add", &main_repo, &hook_ctx)?;
+    hooks::run_hook("pre_add", &main_repo, &hook_ctx, &config)?;
 
     // Git worktree を作成
     let mut git_args = vec!["worktree".to_string(), "add".to_string()];
@@ -91,10 +92,7 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
 
     // Lima テンプレートを生成
     println!("Creating Lima VM template...");
-    let mut template_config = template::TemplateConfig::new(&worktree_path.to_string_lossy());
-    if let Some(mirror) = config.registry_mirror() {
-        template_config.registry_mirror = Some(mirror.to_string());
-    }
+    let template_config = template::TemplateConfig::new(&worktree_path.to_string_lossy());
     let temp_template = template::create_temp_template(&template_config)?;
 
     // Lima VM を作成
@@ -123,7 +121,7 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
     state.add_instance(instance);
     state.save(&main_repo)?;
 
-    hooks::run_hook("post_add", &worktree_path, &hook_ctx)?;
+    hooks::run_hook("post_add", &worktree_path, &hook_ctx, &config)?;
 
     println!("\n=== Worktree added successfully ===");
     println!("  Worktree: {}", worktree_path.display());

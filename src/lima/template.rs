@@ -7,7 +7,6 @@ pub struct TemplateConfig {
     pub cpus: u32,
     pub memory: String,
     pub disk: String,
-    pub registry_mirror: Option<String>,
 }
 
 impl Default for TemplateConfig {
@@ -17,7 +16,6 @@ impl Default for TemplateConfig {
             cpus: 4,
             memory: "8GiB".to_string(),
             disk: "50GiB".to_string(),
-            registry_mirror: None,
         }
     }
 }
@@ -33,21 +31,6 @@ impl TemplateConfig {
 
 /// Lima VM テンプレートを生成
 pub fn generate(config: &TemplateConfig) -> String {
-    let registry_mirror_block = if let Some(mirror) = config.registry_mirror.as_ref() {
-        format!(
-            r#"
-      # Configure Docker registry mirror
-      mkdir -p /etc/docker
-      cat <<'EOF' > /etc/docker/daemon.json
-      {{"registry-mirrors": ["{mirror}"]}}
-      EOF
-      systemctl restart docker
-"#
-        )
-    } else {
-        String::new()
-    };
-
     format!(
         r#"# fracta Lima VM template
 # Auto-generated for worktree development
@@ -146,25 +129,15 @@ provision:
         fc-cache -f -v
       fi
 
-      # Install agent-browser and Chromium dependencies
-      if ! command -v agent-browser &> /dev/null; then
-        npm install -g agent-browser
-      fi
-
-      # Install browser binaries via agent-browser (uses Playwright under the hood)
-      agent-browser install --with-deps
-
       # Install uv (official installer)
       if ! command -v uv &> /dev/null; then
         curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" UV_NO_MODIFY_PATH=1 sh
       fi
-{registry_mirror_block}
 "#,
         cpus = config.cpus,
         memory = config.memory,
         disk = config.disk,
         worktree_path = config.worktree_path,
-        registry_mirror_block = registry_mirror_block,
     )
 }
 
@@ -194,7 +167,6 @@ mod tests {
         assert_eq!(config.cpus, 4);
         assert_eq!(config.memory, "8GiB");
         assert_eq!(config.disk, "50GiB");
-        assert!(config.registry_mirror.is_none());
     }
 
     #[test]
@@ -210,13 +182,4 @@ mod tests {
         assert!(template.contains("curl -fsSL https://get.docker.com"));
     }
 
-    #[test]
-    fn test_generate_template_with_registry_mirror() {
-        let mut config = TemplateConfig::new("/home/user/project");
-        config.registry_mirror = Some("http://host.lima.internal:5000".to_string());
-        let template = generate(&config);
-
-        assert!(template.contains("registry-mirrors"));
-        assert!(template.contains("host.lima.internal:5000"));
-    }
 }
