@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use super::client;
 
@@ -19,7 +21,7 @@ pub fn start_forward(
     }
 
     let host = format!("lima-{}", instance_name);
-    let child = Command::new("ssh")
+    let mut child = Command::new("ssh")
         .args([
             "-F",
             ssh_config.to_string_lossy().as_ref(),
@@ -32,10 +34,11 @@ pub fn start_forward(
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .context("Failed to start SSH port forward")?;
 
+    ensure_forward_started(&mut child, "port forward")?;
     Ok(child)
 }
 
@@ -51,7 +54,7 @@ pub fn start_proxy(instance_name: &str, local_port: u16) -> Result<Child> {
     }
 
     let host = format!("lima-{}", instance_name);
-    let child = Command::new("ssh")
+    let mut child = Command::new("ssh")
         .args([
             "-F",
             ssh_config.to_string_lossy().as_ref(),
@@ -64,11 +67,38 @@ pub fn start_proxy(instance_name: &str, local_port: u16) -> Result<Child> {
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .context("Failed to start SSH SOCKS5 proxy")?;
 
+    ensure_forward_started(&mut child, "SOCKS5 proxy")?;
     Ok(child)
+}
+
+fn ensure_forward_started(child: &mut Child, label: &str) -> Result<()> {
+    thread::sleep(Duration::from_millis(200));
+    if let Some(status) = child.try_wait().context("Failed to check SSH status")? {
+        let stderr = child
+            .stderr
+            .take()
+            .map(|mut s| {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(&mut s, &mut buf);
+                buf
+            })
+            .unwrap_or_default();
+        anyhow::bail!(
+            "SSH {} exited early: {}{}",
+            label,
+            status,
+            if stderr.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", stderr.trim())
+            }
+        );
+    }
+    Ok(())
 }
 
 /// SSH ポートフォワードを停止

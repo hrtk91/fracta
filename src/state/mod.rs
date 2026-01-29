@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::lima::ssh;
 use crate::utils;
 
 /// ポートフォワード情報
@@ -87,15 +88,21 @@ impl StateV2 {
             .context("Failed to read state file")?;
 
         // v2 形式でパース
-        if let Ok(state) = serde_json::from_str::<StateV2>(&content) {
+        if let Ok(mut state) = serde_json::from_str::<StateV2>(&content) {
             if state.version == 2 {
+                if state.cleanup_dead_processes() {
+                    state.save(main_repo)?;
+                }
                 return Ok(state);
             }
         }
 
         // v1 形式からマイグレーション
         if let Ok(v1) = serde_json::from_str::<StateV1>(&content) {
-            let state = migrate_v1_to_v2(v1);
+            let mut state = migrate_v1_to_v2(v1);
+            if state.cleanup_dead_processes() {
+                state.save(main_repo)?;
+            }
             return Ok(state);
         }
 
@@ -258,6 +265,52 @@ impl StateV2 {
             .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
 
         Ok(std::mem::take(&mut instance.active_forwards))
+    }
+
+    /// 死んでいるプロセスの情報を整理し、ポート割り当てを再構築
+    fn cleanup_dead_processes(&mut self) -> bool {
+        let mut changed = false;
+
+        for instance in &mut self.instances {
+            let before = instance.active_forwards.len();
+            instance
+                .active_forwards
+                .retain(|f| ssh::is_process_alive(f.pid));
+            if instance.active_forwards.len() != before {
+                changed = true;
+            }
+
+            if let Some(proxy) = &instance.active_proxy {
+                if !ssh::is_process_alive(proxy.pid) {
+                    instance.active_proxy = None;
+                    changed = true;
+                }
+            }
+
+            if let Some(browser) = &instance.active_browser {
+                if !ssh::is_process_alive(browser.pid) {
+                    instance.active_browser = None;
+                    changed = true;
+                }
+            }
+        }
+
+        // ポート割り当てを再構築
+        let mut rebuilt = HashMap::new();
+        for instance in &self.instances {
+            for fwd in &instance.active_forwards {
+                rebuilt.insert(fwd.local_port, instance.name.clone());
+            }
+            if let Some(proxy) = &instance.active_proxy {
+                rebuilt.insert(proxy.local_port, instance.name.clone());
+            }
+        }
+        if rebuilt != self.port_allocations {
+            self.port_allocations = rebuilt;
+            changed = true;
+        }
+
+        changed
     }
 }
 
