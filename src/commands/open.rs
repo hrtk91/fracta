@@ -46,7 +46,7 @@ pub fn execute(name: Option<&str>, browser: &str, url: &str) -> Result<()> {
         Some(p) => p,
         None => {
             anyhow::bail!(
-                "No active SOCKS5 proxy for instance '{}'. Run 'fracta proxy {}' first.",
+                "No active SOCKS5 proxy for instance '{}'. Run 'fracta browser proxy {}' first.",
                 name,
                 name
             );
@@ -57,7 +57,7 @@ pub fn execute(name: Option<&str>, browser: &str, url: &str) -> Result<()> {
         state.remove_proxy(name)?;
         state.save(&main_repo)?;
         anyhow::bail!(
-            "SOCKS5 proxy for '{}' is not running. Run 'fracta proxy {}' again.",
+            "SOCKS5 proxy for '{}' is not running. Run 'fracta browser proxy {}' again.",
             name,
             name
         );
@@ -70,7 +70,7 @@ pub fn execute(name: Option<&str>, browser: &str, url: &str) -> Result<()> {
     if let Some(active) = instance.active_browser {
         if ssh::is_process_alive(active.pid) {
             anyhow::bail!(
-                "Playwright is already running for '{}' (PID {}). Run 'fracta close {}' first.",
+                "Playwright is already running for '{}' (PID {}). Run 'fracta browser close {}' first.",
                 name,
                 active.pid,
                 name

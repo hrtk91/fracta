@@ -7,6 +7,8 @@ pub struct TemplateConfig {
     pub cpus: u32,
     pub memory: String,
     pub disk: String,
+    pub mount_type: String,
+    pub user: String,
 }
 
 impl Default for TemplateConfig {
@@ -16,21 +18,55 @@ impl Default for TemplateConfig {
             cpus: 4,
             memory: "8GiB".to_string(),
             disk: "50GiB".to_string(),
+            mount_type: "virtiofs".to_string(),
+            user: "root".to_string(),
         }
     }
 }
 
 impl TemplateConfig {
-    pub fn new(worktree_path: &str) -> Self {
-        Self {
+    pub fn new(worktree_path: &str, mount_type: Option<&str>, user: Option<&str>) -> Self {
+        let mut config = Self {
             worktree_path: worktree_path.to_string(),
             ..Default::default()
+        };
+        if let Some(mount_type) = mount_type {
+            if !mount_type.trim().is_empty() {
+                config.mount_type = mount_type.trim().to_string();
+            }
         }
+        if let Some(user) = user {
+            if !user.trim().is_empty() {
+                config.user = user.trim().to_string();
+            }
+        }
+        config
     }
 }
 
 /// Lima VM テンプレートを生成
 pub fn generate(config: &TemplateConfig) -> String {
+    let mount_block = if config.mount_type == "sshfs" {
+        format!(
+            r#"  - location: "{worktree_path}"
+    writable: true
+    sshfs:
+      cache: true
+      followSymlinks: true
+"#,
+            worktree_path = config.worktree_path
+        )
+    } else {
+        format!(
+            r#"  - location: "{worktree_path}"
+    writable: true
+    mountType: "{mount_type}"
+"#,
+            worktree_path = config.worktree_path,
+            mount_type = config.mount_type
+        )
+    };
+
     format!(
         r#"# fracta Lima VM template
 # Auto-generated for worktree development
@@ -39,6 +75,10 @@ pub fn generate(config: &TemplateConfig) -> String {
 cpus: {cpus}
 memory: "{memory}"
 disk: "{disk}"
+
+# Default user (dev convenience)
+user:
+  name: "{user}"
 
 # Use Ubuntu 24.04 LTS
 images:
@@ -49,11 +89,7 @@ images:
 
 # Mount worktree directory
 mounts:
-  - location: "{worktree_path}"
-    writable: true
-    sshfs:
-      cache: true
-      followSymlinks: true
+{mount_block}
 
 # VM type: vz for Apple Silicon
 vmType: "vz"
@@ -91,7 +127,8 @@ provision:
         cpus = config.cpus,
         memory = config.memory,
         disk = config.disk,
-        worktree_path = config.worktree_path,
+        user = config.user,
+        mount_block = mount_block.trim_end(),
     )
 }
 
@@ -125,15 +162,16 @@ mod tests {
 
     #[test]
     fn test_generate_template() {
-        let config = TemplateConfig::new("/home/user/project");
+        let config = TemplateConfig::new("/home/user/project", None, None);
         let template = generate(&config);
 
         assert!(template.contains("cpus: 4"));
         assert!(template.contains("memory: \"8GiB\""));
         assert!(template.contains("disk: \"50GiB\""));
+        assert!(template.contains("user:\n  name: \"root\""));
         assert!(template.contains("/home/user/project"));
         assert!(template.contains("vmType: \"vz\""));
-        assert!(template.contains("curl -fsSL https://get.docker.com"));
+        assert!(template.contains("mountType: \"virtiofs\""));
     }
 
 }

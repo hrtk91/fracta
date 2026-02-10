@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize, Default)]
 pub struct Config {
     pub compose_base: Option<String>,
+    pub compose_parallel_build: Option<bool>,
+    pub vm_mount_type: Option<String>,
+    pub vm_user: Option<String>,
+    pub vm_build_copy: Option<bool>,
+    pub vm_build_dir: Option<String>,
     pub hooks: Option<HookCommands>,
 }
 
@@ -114,6 +119,21 @@ fn merge_hooks(target: &mut Option<HookCommands>, incoming: HookCommands) {
 fn merge_config(target: &mut Config, incoming: Config) {
     if incoming.compose_base.is_some() {
         target.compose_base = incoming.compose_base;
+    }
+    if incoming.compose_parallel_build.is_some() {
+        target.compose_parallel_build = incoming.compose_parallel_build;
+    }
+    if incoming.vm_mount_type.is_some() {
+        target.vm_mount_type = incoming.vm_mount_type;
+    }
+    if incoming.vm_user.is_some() {
+        target.vm_user = incoming.vm_user;
+    }
+    if incoming.vm_build_copy.is_some() {
+        target.vm_build_copy = incoming.vm_build_copy;
+    }
+    if incoming.vm_build_dir.is_some() {
+        target.vm_build_dir = incoming.vm_build_dir;
     }
     if let Some(hooks) = incoming.hooks {
         merge_hooks(&mut target.hooks, hooks);

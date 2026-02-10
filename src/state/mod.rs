@@ -174,19 +174,6 @@ impl StateV2 {
         }
     }
 
-    /// ポートフォワードを追加
-    pub fn add_forward(&mut self, instance_name: &str, forward: PortForward) -> Result<()> {
-        // まずポート割り当てを更新
-        self.port_allocations.insert(forward.local_port, instance_name.to_string());
-
-        // 次にインスタンスを更新
-        let instance = self.find_instance_mut(instance_name)
-            .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
-
-        instance.active_forwards.push(forward);
-        Ok(())
-    }
-
     /// SOCKS5 プロキシを追加
     pub fn add_proxy(&mut self, instance_name: &str, proxy: ProxyForward) -> Result<()> {
         self.port_allocations.insert(proxy.local_port, instance_name.to_string());
@@ -205,25 +192,6 @@ impl StateV2 {
 
         instance.active_browser = Some(session);
         Ok(())
-    }
-
-    /// ポートフォワードを削除
-    pub fn remove_forward(&mut self, instance_name: &str, local_port: u16) -> Result<Option<PortForward>> {
-        // まずポート割り当てを削除
-        self.port_allocations.remove(&local_port);
-
-        // 次にインスタンスから削除
-        let instance = self.find_instance_mut(instance_name)
-            .ok_or_else(|| anyhow::anyhow!("Instance '{}' not found", instance_name))?;
-
-        let idx = instance.active_forwards.iter()
-            .position(|f| f.local_port == local_port);
-
-        if let Some(idx) = idx {
-            return Ok(Some(instance.active_forwards.remove(idx)));
-        }
-
-        Ok(None)
     }
 
     /// SOCKS5 プロキシを削除
@@ -381,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn test_port_forward_management() {
+    fn test_port_forward_clear_management() {
         let mut state = StateV2 {
             version: 2,
             instances: vec![Instance {
@@ -396,21 +364,17 @@ mod tests {
             port_allocations: HashMap::new(),
         };
 
-        let fwd = PortForward {
+        state.instances[0].active_forwards.push(PortForward {
             local_port: 22901,
             remote_port: 3000,
             pid: 12345,
-        };
+        });
+        state.port_allocations.insert(22901, "test".to_string());
 
-        state.add_forward("test", fwd).unwrap();
-        assert_eq!(state.port_allocations.len(), 1);
-        assert!(state.port_allocations.contains_key(&22901));
-
-        let inst = state.find_instance("test").unwrap();
-        assert_eq!(inst.active_forwards.len(), 1);
-
-        state.remove_forward("test", 22901).unwrap();
+        let removed = state.clear_forwards("test").unwrap();
+        assert_eq!(removed.len(), 1);
         assert!(state.port_allocations.is_empty());
+        assert!(state.instances[0].active_forwards.is_empty());
     }
 
     #[test]

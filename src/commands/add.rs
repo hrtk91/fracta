@@ -92,7 +92,11 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
 
     // Lima テンプレートを生成
     println!("Creating Lima VM template...");
-    let template_config = template::TemplateConfig::new(&worktree_path.to_string_lossy());
+    let template_config = template::TemplateConfig::new(
+        &worktree_path.to_string_lossy(),
+        config.vm_mount_type.as_deref(),
+        config.vm_user.as_deref(),
+    );
     let temp_template = template::create_temp_template(&template_config)?;
 
     // Lima VM を作成
@@ -128,7 +132,7 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
     println!("  Lima VM:  {}", lima_instance);
     println!("\nNext steps:");
     println!("  fracta up {}     - Start VM and docker compose", name);
-    println!("  fracta shell {}  - Connect to VM shell", name);
+    println!("  fracta vm shell {}  - Connect to VM shell", name);
 
     Ok(())
 }
