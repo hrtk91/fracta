@@ -10,6 +10,26 @@
 # 例: "docker-compose.yml"
 compose_base = "docker-compose.yml"
 
+# docker compose の並列ビルド (true/false)
+# 例: true
+# compose_parallel_build = true
+
+# VM のマウント方式 (virtiofs/sshfs)
+# 例: "virtiofs"
+# vm_mount_type = "virtiofs"
+
+# VM のデフォルトユーザー
+# 例: "root"
+# vm_user = "root"
+
+# VM 内のローカルコピーで compose を実行（ビルド高速化向け）
+# 例: true
+# vm_build_copy = true
+
+# VM 内のコピー先ルートディレクトリ
+# 例: "/tmp/fracta-build"
+# vm_build_dir = "/tmp/fracta-build"
+
 # Hooks (optional)
 [hooks]
 # pre_add = ""

@@ -80,6 +80,8 @@ pub fn execute(name: Option<&str>, short: bool) -> Result<()> {
                 .unwrap_or(&compose_base);
             let compose_path = compose_rel.to_string_lossy();
             let vm_worktree_path = worktree_path.to_string_lossy();
+            let project_name = utils::sanitize_name(instance_name);
+            let env_prefix = format!("COMPOSE_PROJECT_NAME={} ", project_name);
 
             println!("\nPorts exposed in VM:");
             let output = lima::shell(
@@ -88,8 +90,8 @@ pub fn execute(name: Option<&str>, short: bool) -> Result<()> {
                     "bash",
                     "-c",
                     &format!(
-                        "cd '{}' && sudo docker compose -f '{}' ps --format json 2>/dev/null | jq -r '.[] | select(.Publishers != null) | .Publishers[] | \"\\(.TargetPort)\\t\\(.PublishedPort)\"' 2>/dev/null || echo 'Run \"fracta up {}\" to see container ports'",
-                        vm_worktree_path, compose_path, instance_name
+                        "cd '{}' && {}sudo docker compose -f '{}' ps --format json 2>/dev/null | jq -r '.[] | select(.Publishers != null) | .Publishers[] | \"\\(.TargetPort)\\t\\(.PublishedPort)\"' 2>/dev/null || echo 'Run \"fracta up {}\" to see container ports'",
+                        vm_worktree_path, env_prefix, compose_path, instance_name
                     ),
                 ],
             )?;

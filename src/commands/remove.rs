@@ -64,6 +64,8 @@ pub fn execute(
                 .unwrap_or(&compose_base);
             let compose_path = compose_rel.to_string_lossy();
             let vm_worktree_path = worktree_path.to_string_lossy();
+            let project_name = utils::sanitize_name(&instance.name);
+            let env_prefix = format!("COMPOSE_PROJECT_NAME={} ", project_name);
 
             println!("Running docker compose down in VM...");
             let output = lima::shell(
@@ -72,8 +74,8 @@ pub fn execute(
                     "bash",
                     "-c",
                     &format!(
-                        "cd '{}' && sudo docker compose -f '{}' down 2>/dev/null || true",
-                        vm_worktree_path, compose_path
+                        "cd '{}' && {}sudo docker compose -f '{}' down 2>/dev/null || true",
+                        vm_worktree_path, env_prefix, compose_path
                     ),
                 ],
             );
