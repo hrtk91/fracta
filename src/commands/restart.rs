@@ -51,6 +51,8 @@ pub fn execute(name: Option<&str>) -> Result<()> {
         .unwrap_or(&compose_base);
     let compose_path = compose_rel.to_string_lossy();
     let vm_worktree_path = worktree_path.to_string_lossy();
+    let project_name = utils::sanitize_name(name);
+    let env_prefix = format!("COMPOSE_PROJECT_NAME={} ", project_name);
 
     // VM 内で docker compose restart を実行
     println!("Running docker compose restart in VM...");
@@ -60,8 +62,8 @@ pub fn execute(name: Option<&str>) -> Result<()> {
             "bash",
             "-c",
             &format!(
-                "cd '{}' && sudo docker compose -f '{}' restart",
-                vm_worktree_path, compose_path
+                "cd '{}' && {}sudo docker compose -f '{}' restart",
+                vm_worktree_path, env_prefix, compose_path
             ),
         ],
     )?;

@@ -8,7 +8,7 @@
 
 - worktreeごとに専用の Lima VM を作成
 - VM 内で docker compose を実行するため、ホスト側のポート衝突を避けられる
-- 必要なサービスだけを SSH ポートフォワードで公開
+- SOCKS5 経由で VM 内サービスにアクセス
 - ブランチ切り替え時も環境を維持してそのまま切り替え
 
 ## 📋 前提条件
@@ -44,15 +44,16 @@ fracta up feature-A
 # 画像同期をスキップ
 fracta up feature-A --no-sync-images
 
-# 3. VM 内で公開されているポートを確認
-fracta ports feature-A
+# 3. 状態と公開ポートを確認
+fracta status feature-A
 
-# 4. 必要なサービスをローカルへフォワード
-fracta forward feature-A 18080 8080
-# → http://localhost:18080 でアクセス
+# 4. SOCKS5 プロキシ経由でアクセス
+fracta browser open feature-A --url http://localhost:12901
 
 # 5. 停止（--vm で VM も停止）
 fracta down feature-A --vm
+# または VM だけ停止
+fracta vm stop feature-A
 
 # 6. 完全削除（worktree + VM）
 fracta remove feature-A
@@ -105,6 +106,27 @@ fracta down
 **オプション：**
 - `--vm`: Lima VM も停止
 
+#### `vm <subcommand>`
+
+Lima VM を直接操作します（compose は操作しません）。
+
+```bash
+# VM 起動
+fracta vm start feature-A
+
+# VM 停止
+fracta vm stop feature-A
+
+# VM にシェル接続
+fracta vm shell feature-A
+fracta vm shell feature-A -- ls -la
+
+# VM 一覧
+fracta vm list
+# または
+fracta vm ls
+```
+
 #### `restart [name]`
 
 worktree を再起動します。
@@ -130,41 +152,21 @@ fracta rm feature-A
 - `--vm-only`: Lima VM のみ削除（worktreeは残す）
 - `--worktree-only`: worktreeのみ削除（VMは残す）
 
-#### `ps [name]`
+#### `status [name]`
 
-worktree の状態を表示します。
-
-```bash
-fracta ps             # 現在ディレクトリの worktree
-fracta ps feature-A   # 特定 worktree
-```
-
-#### `ports [name]`
-
-公開ポート（VM 内の compose とフォワード状況）を表示します。
+worktree の状態と公開ポートを表示します。
 
 ```bash
-fracta ports
-fracta ports feature-A
-fracta ports --short   # フォワードのみ（local/remote）
+fracta status             # 現在ディレクトリの worktree
+fracta status feature-A   # 特定 worktree
 ```
 
-#### `ls`
-
-worktree 一覧を表示します。
-
-```bash
-fracta ls
-# または
-fracta list
-```
-
-#### `shell <name>`
+#### `vm shell [name]`
 
 Lima VM にシェル接続します。
 
 ```bash
-fracta shell feature-A
+fracta vm shell feature-A
 ```
 
 **オプション（limactl shell と同じインターフェース）**:
@@ -173,30 +175,9 @@ fracta shell feature-A
 - `--tty <true|false>`: TTY を明示
 
 ```bash
-fracta shell feature-A -- ls -la
-fracta shell feature-A --shell /bin/bash --workdir /home -- pwd
-fracta shell feature-A --tty false -- ls -la
-```
-
-#### `forward [name] <local_port> <remote_port>`
-
-SSH ポートフォワードを開始します。
-
-```bash
-fracta forward feature-A 18080 8080
-# worktree 内なら省略可能
-fracta forward 18080 8080
-```
-
-#### `unforward [name] [local_port]`
-
-SSH ポートフォワードを停止します。
-
-```bash
-fracta unforward feature-A 18080
-fracta unforward feature-A --all
-# worktree 内なら省略可能
-fracta unforward 18080
+fracta vm shell feature-A -- ls -la
+fracta vm shell feature-A --shell /bin/bash --workdir /home -- pwd
+fracta vm shell feature-A --tty false -- ls -la
 ```
 
 ## 🧦 SOCKS5 プロキシ + Playwright
@@ -210,30 +191,30 @@ fracta unforward 18080
 - Playwright（ホスト側にインストール済み）
   - 例: `npm i -g playwright` または `npm i -D playwright`
 
-### proxy
+### browser proxy
 
 ```bash
 # SOCKS5 を開始（ポート自動割当: 1080-1099）
-fracta proxy feature-A
+fracta browser proxy feature-A
 
 # ポート指定
-fracta proxy feature-A --port 1081
+fracta browser proxy feature-A --port 1081
 ```
 
-### open / close
+### browser open / close
 
 ```bash
-# Playwright で Chrome を起動（SOCKS5 経由）
-fracta open feature-A --url http://localhost:12901
+# Playwright で Chrome を起動（必要ならSOCKS5を自動起動）
+fracta browser open feature-A --url http://localhost:12901
 
 # Firefox で起動
-fracta open feature-A --browser firefox
+fracta browser open feature-A --browser firefox
 
 # 停止
-fracta close feature-A
+fracta browser close feature-A
 ```
 
-> `proxy/open/close` は `name` 省略時、現在ディレクトリの worktree を対象にします。
+> `browser ...` は `name` 省略時、現在ディレクトリの worktree を対象にします。
 
 ## ⚙️ 設定ファイル（fracta.toml）
 
@@ -315,22 +296,20 @@ fracta up <worktree>
 - VMを削除するとキャッシュも消えます。**VMを残す運用が最速**です。
 - hookで重いセットアップを入れると起動が遅くなるため、必要最小限に。
 
-## 🔌 ポートフォワード
+## 🔌 アクセス方法
 
-`fracta`はホストのポートを自動で割り当てません。必要なサービスのみを手動でフォワードします。
+`fracta` は SOCKS5 プロキシ経由で VM 内サービスにアクセスします。
 
 ```bash
 # VM 内で公開されているポートを確認
-fracta ports feature-A
+fracta status feature-A
 
-# ローカル 18080 -> VM 8080 をフォワード
-fracta forward feature-A 18080 8080
+# SOCKS5 プロキシを開始
+fracta browser proxy feature-A
 
-# 停止
-fracta unforward feature-A 18080
+# ブラウザを起動してアクセス
+fracta browser open feature-A --url http://localhost:12901
 ```
-
-`fracta`はフォワード済みポートを `state.json` に記録し、同じローカルポートの重複を防ぎます。
 
 ## 📁 ディレクトリ構造
 
@@ -366,8 +345,9 @@ fracta up feature-A
 
 ### ポートにアクセスできない
 
-- `fracta ports` で VM 内の公開ポートを確認
-- `fracta forward` でローカルにフォワード
+- `fracta status` で VM 内の公開ポートを確認
+- `fracta browser status` で SOCKS5 の起動状態を確認
+- `fracta browser open --url ...` の URL ポートを見直し
 
 ### compose base が見つからない
 
@@ -376,7 +356,7 @@ fracta up feature-A
 
 ### compose が失敗する
 
-`fracta shell` で VM に入り、worktree ディレクトリから直接 `docker compose` を実行してエラー内容を確認してください。
+`fracta vm shell` で VM に入り、worktree ディレクトリから直接 `docker compose` を実行してエラー内容を確認してください。
 
 ## 📝 ライセンス
 

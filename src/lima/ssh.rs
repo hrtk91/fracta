@@ -5,43 +5,6 @@ use std::time::Duration;
 
 use super::client;
 
-/// SSH ポートフォワードを開始
-pub fn start_forward(
-    instance_name: &str,
-    local_port: u16,
-    remote_port: u16,
-) -> Result<Child> {
-    let ssh_config = client::ssh_config_path(instance_name);
-
-    if !ssh_config.exists() {
-        anyhow::bail!(
-            "SSH config not found for instance '{}'. Is the VM running?",
-            instance_name
-        );
-    }
-
-    let host = format!("lima-{}", instance_name);
-    let mut child = Command::new("ssh")
-        .args([
-            "-F",
-            ssh_config.to_string_lossy().as_ref(),
-            "-N",
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-L",
-            &format!("{}:localhost:{}", local_port, remote_port),
-            &host,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("Failed to start SSH port forward")?;
-
-    ensure_forward_started(&mut child, "port forward")?;
-    Ok(child)
-}
-
 /// SSH SOCKS5 プロキシを開始
 pub fn start_proxy(instance_name: &str, local_port: u16) -> Result<Child> {
     let ssh_config = client::ssh_config_path(instance_name);

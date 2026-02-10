@@ -45,6 +45,8 @@ pub fn execute(name: Option<&str>, stop_vm: bool) -> Result<()> {
             .unwrap_or(&compose_base);
         let compose_path = compose_rel.to_string_lossy();
         let vm_worktree_path = worktree_path.to_string_lossy();
+        let project_name = utils::sanitize_name(&instance_name);
+        let env_prefix = format!("COMPOSE_PROJECT_NAME={} ", project_name);
 
         // VM 内で docker compose down を実行
         println!("Running docker compose down in VM...");
@@ -54,8 +56,8 @@ pub fn execute(name: Option<&str>, stop_vm: bool) -> Result<()> {
                 "bash",
                 "-c",
                 &format!(
-                    "cd '{}' && sudo docker compose -f '{}' down",
-                    vm_worktree_path, compose_path
+                    "cd '{}' && {}sudo docker compose -f '{}' down",
+                    vm_worktree_path, env_prefix, compose_path
                 ),
             ],
         )?;
