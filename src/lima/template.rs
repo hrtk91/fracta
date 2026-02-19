@@ -19,7 +19,7 @@ impl Default for TemplateConfig {
             memory: "8GiB".to_string(),
             disk: "50GiB".to_string(),
             mount_type: "virtiofs".to_string(),
-            user: "root".to_string(),
+            user: "lima".to_string(),
         }
     }
 }
@@ -57,13 +57,12 @@ pub fn generate(config: &TemplateConfig) -> String {
             worktree_path = config.worktree_path
         )
     } else {
+        // vmType: "vz" では virtiofs がデフォルトなので mountType は不要
         format!(
             r#"  - location: "{worktree_path}"
     writable: true
-    mountType: "{mount_type}"
 "#,
-            worktree_path = config.worktree_path,
-            mount_type = config.mount_type
+            worktree_path = config.worktree_path
         )
     };
 
@@ -168,10 +167,10 @@ mod tests {
         assert!(template.contains("cpus: 4"));
         assert!(template.contains("memory: \"8GiB\""));
         assert!(template.contains("disk: \"50GiB\""));
-        assert!(template.contains("user:\n  name: \"root\""));
+        assert!(template.contains("user:\n  name: \"lima\""));
         assert!(template.contains("/home/user/project"));
         assert!(template.contains("vmType: \"vz\""));
-        assert!(template.contains("mountType: \"virtiofs\""));
+        assert!(!template.contains("mountType"));
     }
 
 }
