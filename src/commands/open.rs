@@ -5,7 +5,7 @@ use crate::lima::ssh;
 use crate::state::{BrowserSession, State};
 use crate::utils;
 
-fn build_script(browser: &str, proxy_port: u16, url: &str) -> String {
+fn build_script(browser: &str, proxy_port: u16, url: &str, headless: bool) -> String {
     let browser = match browser {
         "chrome" | "chromium" => "chromium",
         "firefox" => "firefox",
@@ -18,7 +18,7 @@ const {{ {} }} = require('playwright');
 
 (async () => {{
   const browser = await {}.launch({{
-    headless: false,
+    headless: {},
     proxy: {{ server: 'socks5://127.0.0.1:{}' }}
   }});
   const context = await browser.newContext();
@@ -31,11 +31,11 @@ const {{ {} }} = require('playwright');
   process.exit(1);
 }});
 "#,
-        browser, browser, proxy_port, url
+        browser, browser, headless, proxy_port, url
     )
 }
 
-pub fn execute(name: Option<&str>, browser: &str, url: &str) -> Result<()> {
+pub fn execute(name: Option<&str>, browser: &str, url: &str, headless: bool) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
     let mut state = State::load(&main_repo)?;
 
@@ -79,10 +79,11 @@ pub fn execute(name: Option<&str>, browser: &str, url: &str) -> Result<()> {
         state.remove_browser(name)?;
     }
 
-    let script = build_script(browser, proxy.local_port, url);
+    let script = build_script(browser, proxy.local_port, url, headless);
 
     let child = Command::new("node")
         .args(["-e", &script])
+        .current_dir(&main_repo)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

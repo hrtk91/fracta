@@ -63,6 +63,7 @@ enum VmCommands {
 #[derive(Subcommand)]
 enum BrowserCommands {
     /// Playwright でブラウザを起動（必要ならSOCKS5を自動起動）
+    #[command(group(clap::ArgGroup::new("head_mode").required(true)))]
     Open {
         /// worktree 名（省略時は現在ディレクトリの worktree）
         name: Option<String>,
@@ -78,6 +79,14 @@ enum BrowserCommands {
         /// SOCKS5 ローカルポート（省略時は自動割当）
         #[arg(long)]
         proxy_port: Option<u16>,
+
+        /// ブラウザを表示する
+        #[arg(long, group = "head_mode")]
+        head: bool,
+
+        /// ヘッドレスモード（表示なし）
+        #[arg(long, group = "head_mode")]
+        no_head: bool,
     },
 
     /// Playwright ブラウザを停止
@@ -240,12 +249,13 @@ fn main() {
             VmCommands::List => commands::vm::list(),
         },
         Commands::Browser { command } => match command {
-            BrowserCommands::Open { name, browser, url, proxy_port } => {
+            BrowserCommands::Open { name, browser, url, proxy_port, head, no_head: _ } => {
                 commands::browser::open(
                     name.as_deref(),
                     &browser,
                     &url,
                     proxy_port,
+                    !head,
                 )
             }
             BrowserCommands::Close { name } => commands::browser::close(name.as_deref()),

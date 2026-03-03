@@ -10,6 +10,7 @@ pub fn open(
     browser: &str,
     url: &str,
     proxy_port: Option<u16>,
+    headless: bool,
 ) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
     let state = State::load(&main_repo)?;
@@ -26,7 +27,7 @@ pub fn open(
         commands::proxy::execute(Some(&instance_name), proxy_port)?;
     }
 
-    commands::open::execute(Some(&instance_name), browser, url)
+    commands::open::execute(Some(&instance_name), browser, url, headless)
 }
 
 pub fn close(name: Option<&str>) -> Result<()> {
