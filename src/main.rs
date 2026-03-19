@@ -126,6 +126,10 @@ enum Commands {
         /// 新規ブランチを作成（オプション：基準ブランチ名を指定、省略時はHEADから作成）
         #[arg(short = 'b', long = "new-branch")]
         base_branch: Option<Option<String>>,
+
+        /// worktree のみ作成（Lima VM を作成しない）
+        #[arg(long)]
+        worktree_only: bool,
     },
 
     /// docker compose を起動（VM が停止中なら起動）
@@ -208,8 +212,8 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Add { name, base_branch } => {
-            commands::add::execute(&name, base_branch)
+        Commands::Add { name, base_branch, worktree_only } => {
+            commands::add::execute(&name, base_branch, worktree_only)
         }
         Commands::Up {
             name,

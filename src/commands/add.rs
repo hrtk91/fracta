@@ -7,11 +7,11 @@ use crate::lima::{client as lima, template};
 use crate::state::{Instance, State};
 use crate::utils;
 
-pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
+pub fn execute(name: &str, base_branch: Option<Option<String>>, worktree_only: bool) -> Result<()> {
     println!("=== Adding worktree: {} ===", name);
 
-    // Lima が利用可能か確認
-    if !lima::is_available() {
+    // Lima が利用可能か確認（worktree-only モードでは不要）
+    if !worktree_only && !lima::is_available() {
         anyhow::bail!("Lima is not installed. Please install lima first: brew install lima");
     }
 
@@ -34,18 +34,24 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         .context("Failed to get parent directory")?
         .join(format!("{}-{}", repo_name, sanitized_name));
 
-    let lima_instance = lima::instance_name(name);
+    let lima_instance = if worktree_only {
+        String::new()
+    } else {
+        lima::instance_name(name)
+    };
 
     let config = config::load_config(&main_repo, Some(&worktree_path))?;
 
-    // Lima インスタンスが既に存在するか確認
-    let info = lima::info(&lima_instance)?;
-    if info != lima::InstanceStatus::NotFound {
-        anyhow::bail!(
-            "Lima instance '{}' already exists. Remove it first with: limactl delete {}",
-            lima_instance,
-            lima_instance
-        );
+    // Lima インスタンスが既に存在するか確認（worktree-only モードではスキップ）
+    if !worktree_only {
+        let info = lima::info(&lima_instance)?;
+        if info != lima::InstanceStatus::NotFound {
+            anyhow::bail!(
+                "Lima instance '{}' already exists. Remove it first with: limactl delete {}",
+                lima_instance,
+                lima_instance
+            );
+        }
     }
 
     let compose_base = utils::compose_base_path(&config, &worktree_path);
@@ -90,25 +96,27 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
         anyhow::bail!("git worktree add failed: {}", stderr.trim());
     }
 
-    // Lima テンプレートを生成
-    println!("Creating Lima VM template...");
-    let template_config = template::TemplateConfig::new(
-        &worktree_path.to_string_lossy(),
-        config.vm_mount_type.as_deref(),
-        config.vm_user.as_deref(),
-    );
-    let temp_template = template::create_temp_template(&template_config)?;
+    if !worktree_only {
+        // Lima テンプレートを生成
+        println!("Creating Lima VM template...");
+        let template_config = template::TemplateConfig::new(
+            &worktree_path.to_string_lossy(),
+            config.vm_mount_type.as_deref(),
+            config.vm_user.as_deref(),
+        );
+        let temp_template = template::create_temp_template(&template_config)?;
 
-    // Lima VM を作成
-    println!("Creating Lima VM: {}...", lima_instance);
-    if let Err(e) = lima::create(temp_template.path(), &lima_instance) {
-        // 失敗した場合は worktree を削除
-        eprintln!("Failed to create Lima VM, cleaning up worktree...");
-        let _ = Command::new("git")
-            .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
-            .current_dir(&main_repo)
-            .output();
-        return Err(e);
+        // Lima VM を作成
+        println!("Creating Lima VM: {}...", lima_instance);
+        if let Err(e) = lima::create(temp_template.path(), &lima_instance) {
+            // 失敗した場合は worktree を削除
+            eprintln!("Failed to create Lima VM, cleaning up worktree...");
+            let _ = Command::new("git")
+                .args(["worktree", "remove", "--force", worktree_path.to_string_lossy().as_ref()])
+                .current_dir(&main_repo)
+                .output();
+            return Err(e);
+        }
     }
 
     // 状態を保存
@@ -129,10 +137,16 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>) -> Result<()> {
 
     println!("\n=== Worktree added successfully ===");
     println!("  Worktree: {}", worktree_path.display());
-    println!("  Lima VM:  {}", lima_instance);
-    println!("\nNext steps:");
-    println!("  fracta up {}     - Start VM and docker compose", name);
-    println!("  fracta vm shell {}  - Connect to VM shell", name);
+    if worktree_only {
+        println!("  Lima VM:  (skipped)");
+        println!("\nNext steps:");
+        println!("  cd {}  - Move to worktree", worktree_path.display());
+    } else {
+        println!("  Lima VM:  {}", lima_instance);
+        println!("\nNext steps:");
+        println!("  fracta up {}     - Start VM and docker compose", name);
+        println!("  fracta vm shell {}  - Connect to VM shell", name);
+    }
 
     Ok(())
 }
