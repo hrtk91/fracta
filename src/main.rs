@@ -201,6 +201,10 @@ enum Commands {
         name: Option<String>,
     },
 
+    /// インスタンス一覧を表示
+    #[command(alias = "ls")]
+    List,
+
     /// Lima VM を直接操作
     Vm {
         #[command(subcommand)]
@@ -246,6 +250,7 @@ fn main() {
             commands::remove::execute(name.as_deref(), force, vm_only, worktree_only)
         }
         Commands::Status { name } => commands::status::execute(name.as_deref()),
+        Commands::List => commands::vm::list(),
         Commands::Vm { command } => match command {
             VmCommands::Add { name } => commands::vm::add_vm(name.as_deref()),
             VmCommands::Start { name } => commands::vm::start(name.as_deref()),
