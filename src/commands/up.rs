@@ -43,16 +43,22 @@ pub fn execute(
                 instance.lima_instance
             );
 
-            let tmpl_cfg = template::TemplateConfig::new(
+            let mut tmpl_cfg = template::TemplateConfig::new(
                 &worktree_path.to_string_lossy(),
                 config.vm_mount_type.as_deref(),
                 config.vm_user.as_deref(),
             );
+            if let Some(scripts) = &config.vm_provision_scripts {
+                tmpl_cfg.load_provision_scripts(scripts, &main_repo)?;
+            }
             let temp_template = template::create_temp_template(&tmpl_cfg)?;
 
             lima::create(temp_template.path(), &instance.lima_instance)?;
             println!("Starting Lima VM: {}...", instance.lima_instance);
-            lima::start(&instance.lima_instance)?;
+            let timeout = config.vm_provision_timeout.as_deref().or(
+                if config.vm_provision_scripts.is_some() { Some("20m0s") } else { None }
+            );
+            lima::start_with_timeout(&instance.lima_instance, timeout)?;
         }
         lima::InstanceStatus::Stopped => {
             println!("Starting Lima VM: {}...", instance.lima_instance);

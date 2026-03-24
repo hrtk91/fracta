@@ -50,8 +50,20 @@ pub fn create(template_path: &Path, instance_name: &str) -> Result<()> {
 
 /// Lima インスタンスを起動
 pub fn start(instance_name: &str) -> Result<()> {
+    start_with_timeout(instance_name, None)
+}
+
+/// Lima インスタンスを起動（タイムアウト指定）
+pub fn start_with_timeout(instance_name: &str, timeout: Option<&str>) -> Result<()> {
+    let mut args = vec!["start".to_string()];
+    if let Some(t) = timeout {
+        args.push("--timeout".to_string());
+        args.push(t.to_string());
+    }
+    args.push(instance_name.to_string());
+
     let output = Command::new("limactl")
-        .args(["start", instance_name])
+        .args(&args)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output()

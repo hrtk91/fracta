@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::path::Path;
 
 /// Lima テンプレート設定
 #[derive(Debug, Clone)]
@@ -9,6 +10,7 @@ pub struct TemplateConfig {
     pub disk: String,
     pub mount_type: String,
     pub user: String,
+    pub provision_scripts: Vec<String>,
 }
 
 impl Default for TemplateConfig {
@@ -20,6 +22,7 @@ impl Default for TemplateConfig {
             disk: "50GiB".to_string(),
             mount_type: "virtiofs".to_string(),
             user: "lima".to_string(),
+            provision_scripts: Vec::new(),
         }
     }
 }
@@ -42,6 +45,134 @@ impl TemplateConfig {
         }
         config
     }
+
+    /// fracta.toml の vm_provision_scripts からスクリプト内容を読み込む
+    pub fn load_provision_scripts(
+        &mut self,
+        script_paths: &[String],
+        base_dir: &Path,
+    ) -> Result<()> {
+        for path_str in script_paths {
+            let script_path = if Path::new(path_str).is_absolute() {
+                std::path::PathBuf::from(path_str)
+            } else {
+                base_dir.join(path_str)
+            };
+            let content = std::fs::read_to_string(&script_path).context(format!(
+                "Failed to read provision script: {}",
+                script_path.display()
+            ))?;
+            self.provision_scripts.push(content);
+        }
+        Ok(())
+    }
+}
+
+/// provision セクションを生成
+fn generate_provision(config: &TemplateConfig) -> String {
+    let mut provisions = String::new();
+
+    // 基本: sudo 設定
+    provisions.push_str(
+        r#"  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      echo "{{.User}} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/fracta-user
+      chmod 0440 /etc/sudoers.d/fracta-user
+"#,
+    );
+
+    // ユーザー指定のプロビジョニングスクリプト（冪等性マーカー付き）
+    for (i, script) in config.provision_scripts.iter().enumerate() {
+        // スクリプト内容のハッシュでマーカーを作る
+        let hash = simple_hash(script);
+        let marker = format!("/var/lib/fracta/provisioned/{}", hash);
+
+        let indented_body = indent_script(script);
+        provisions.push_str(&format!(
+            r#"  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      # Provision script {} (hash: {})
+      if [ -f '{}' ]; then
+        echo "Already provisioned ({}), skipping"
+        exit 0
+      fi
+{}
+      mkdir -p /var/lib/fracta/provisioned
+      touch '{}'
+"#,
+            i + 1,
+            hash,
+            marker,
+            hash,
+            indented_body,
+            marker,
+        ));
+    }
+
+    provisions
+}
+
+/// probe セクションを生成（provision スクリプトがある場合のみ）
+fn generate_probes(config: &TemplateConfig) -> String {
+    if config.provision_scripts.is_empty() {
+        return String::new();
+    }
+
+    // 最後のプロビジョニングスクリプトのマーカーを待つ
+    let last_hash = simple_hash(config.provision_scripts.last().unwrap());
+    let marker = format!("/var/lib/fracta/provisioned/{}", last_hash);
+
+    format!(
+        r#"
+# Wait for provisioning to complete
+probes:
+  - script: |
+      #!/bin/bash
+      if ! timeout 600s bash -c "until [ -f '{}' ]; do sleep 5; done"; then
+        echo "Provisioning did not complete in time"
+        exit 1
+      fi
+    hint: "Waiting for provisioning to complete..."
+"#,
+        marker,
+    )
+}
+
+/// スクリプトを provision ブロック内のインデントに合わせる
+fn indent_script(script: &str) -> String {
+    let trimmed = script.trim();
+    // shebang を除去（provision の script: | ブロック内では不要、既に #!/bin/bash がある）
+    let body = if trimmed.starts_with("#!") {
+        trimmed
+            .lines()
+            .skip(1)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string()
+    } else {
+        trimmed.to_string()
+    };
+
+    body.lines()
+        .map(|line| format!("      {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 簡易ハッシュ（マーカーファイル名用）
+fn simple_hash(s: &str) -> String {
+    // FNV-1a 64bit
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in s.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{:016x}", hash)
 }
 
 /// Lima VM テンプレートを生成
@@ -57,7 +188,6 @@ pub fn generate(config: &TemplateConfig) -> String {
             worktree_path = config.worktree_path
         )
     } else {
-        // vmType: "vz" では virtiofs がデフォルトなので mountType は不要
         format!(
             r#"  - location: "{worktree_path}"
     writable: true
@@ -65,6 +195,9 @@ pub fn generate(config: &TemplateConfig) -> String {
             worktree_path = config.worktree_path
         )
     };
+
+    let provision_block = generate_provision(config);
+    let probes_block = generate_probes(config);
 
     format!(
         r#"# fracta Lima VM template
@@ -111,23 +244,17 @@ containerd:
   system: false
   user: false
 
-# Provisioning script (keep minimal to avoid boot timeout)
+# Provisioning
 provision:
-  - mode: system
-    script: |
-      #!/bin/bash
-      set -eux -o pipefail
-
-      # Allow passwordless sudo for the Lima user (development convenience)
-      echo "{{{{.User}}}} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/fracta-user
-      chmod 0440 /etc/sudoers.d/fracta-user
-
+{provision_block}{probes_block}
 "#,
         cpus = config.cpus,
         memory = config.memory,
         disk = config.disk,
         user = config.user,
         mount_block = mount_block.trim_end(),
+        provision_block = provision_block.trim_end(),
+        probes_block = probes_block,
     )
 }
 
@@ -173,4 +300,36 @@ mod tests {
         assert!(!template.contains("mountType"));
     }
 
+    #[test]
+    fn test_generate_with_provision() {
+        let mut config = TemplateConfig::new("/home/user/project", None, None);
+        config.provision_scripts = vec![
+            "#!/bin/bash\napt-get update\napt-get install -y curl".to_string(),
+        ];
+        let template = generate(&config);
+
+        assert!(template.contains("Already provisioned"));
+        assert!(template.contains("apt-get update"));
+        assert!(template.contains("apt-get install -y curl"));
+        assert!(template.contains("probes:"));
+        assert!(template.contains("timeout 600s"));
+    }
+
+    #[test]
+    fn test_simple_hash_deterministic() {
+        let h1 = simple_hash("hello");
+        let h2 = simple_hash("hello");
+        let h3 = simple_hash("world");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+        assert_eq!(h1.len(), 16);
+    }
+
+    #[test]
+    fn test_indent_script_strips_shebang() {
+        let script = "#!/bin/bash\necho hello\necho world";
+        let indented = indent_script(script);
+        assert!(!indented.contains("#!/bin/bash"));
+        assert!(indented.contains("      echo hello"));
+    }
 }

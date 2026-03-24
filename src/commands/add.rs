@@ -99,11 +99,14 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>, worktree_only: b
     if !worktree_only {
         // Lima テンプレートを生成
         println!("Creating Lima VM template...");
-        let template_config = template::TemplateConfig::new(
+        let mut template_config = template::TemplateConfig::new(
             &worktree_path.to_string_lossy(),
             config.vm_mount_type.as_deref(),
             config.vm_user.as_deref(),
         );
+        if let Some(scripts) = &config.vm_provision_scripts {
+            template_config.load_provision_scripts(scripts, &main_repo)?;
+        }
         let temp_template = template::create_temp_template(&template_config)?;
 
         // Lima VM を作成
