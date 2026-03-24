@@ -1,11 +1,37 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::collections::BTreeSet;
-use std::path::Path;
+use std::collections::{BTreeSet, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, SystemTime};
 
 use crate::lima::client as lima;
 use crate::utils;
+
+const CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60); // 7 days
+
+fn cache_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("HOME not set")?;
+    Ok(PathBuf::from(home).join(".fracta").join("cache"))
+}
+
+/// image ID から短縮ハッシュを取得（ファイル名用）
+fn cache_key(image_id: &str) -> String {
+    // image_id is like "sha256:abcdef1234..."
+    let hash = image_id.strip_prefix("sha256:").unwrap_or(image_id);
+    hash[..12.min(hash.len())].to_string()
+}
+
+fn cache_path(image_id: &str) -> Result<PathBuf> {
+    Ok(cache_dir()?.join(format!("{}.tar.gz", cache_key(image_id))))
+}
+
+fn ensure_cache_dir() -> Result<PathBuf> {
+    let dir = cache_dir()?;
+    fs::create_dir_all(&dir).context("Failed to create cache directory")?;
+    Ok(dir)
+}
 
 fn docker_compose_config(compose_base: &Path, worktree_path: &Path) -> Result<Value> {
     let compose_path = compose_base
@@ -101,7 +127,15 @@ fn vm_image_id(instance_name: &str, image: &str) -> Result<Option<String>> {
     }
 }
 
-fn sync_image(instance_name: &str, image: &str) -> Result<()> {
+/// docker save | gzip してキャッシュに保存
+fn save_to_cache(image: &str, image_id: &str) -> Result<PathBuf> {
+    ensure_cache_dir()?;
+    let path = cache_path(image_id)?;
+
+    if path.exists() {
+        return Ok(path);
+    }
+
     let mut save = Command::new("docker")
         .args(["save", image])
         .stdout(Stdio::piped())
@@ -113,28 +147,93 @@ fn sync_image(instance_name: &str, image: &str) -> Result<()> {
         .take()
         .context("Failed to capture docker save output")?;
 
-    let mut load = Command::new("limactl")
-        .args(["shell", "--workdir", "/", instance_name, "--", "sudo", "docker", "load"])
+    let mut gzip = Command::new("gzip")
+        .args(["-1"]) // fast compression
         .stdin(Stdio::from(save_stdout))
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("Failed to run gzip")?;
+
+    let gzip_stdout = gzip
+        .stdout
+        .take()
+        .context("Failed to capture gzip output")?;
+
+    // Write to temp file first, then rename for atomicity
+    let tmp_path = path.with_extension("tar.gz.tmp");
+    let mut tmp_file =
+        fs::File::create(&tmp_path).context("Failed to create temp cache file")?;
+    std::io::copy(&mut std::io::BufReader::new(gzip_stdout), &mut tmp_file)
+        .context("Failed to write cache file")?;
+
+    let gzip_status = gzip.wait().context("Failed to wait for gzip")?;
+    let save_status = save.wait().context("Failed to wait for docker save")?;
+
+    if !save_status.success() || !gzip_status.success() {
+        let _ = fs::remove_file(&tmp_path);
+        anyhow::bail!("docker save | gzip failed for image {}", image);
+    }
+
+    fs::rename(&tmp_path, &path).context("Failed to rename cache file")?;
+    Ok(path)
+}
+
+/// キャッシュから VM に load
+fn load_from_cache(instance_name: &str, cache_file: &Path) -> Result<()> {
+    let mut gunzip = Command::new("gunzip")
+        .args(["-c"])
+        .arg(cache_file)
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("Failed to run gunzip")?;
+
+    let gunzip_stdout = gunzip
+        .stdout
+        .take()
+        .context("Failed to capture gunzip output")?;
+
+    let mut load = Command::new("limactl")
+        .args([
+            "shell", "--workdir", "/", instance_name, "--", "sudo", "docker", "load",
+        ])
+        .stdin(Stdio::from(gunzip_stdout))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .context("Failed to run docker load in VM")?;
 
     let load_status = load.wait().context("Failed to wait for docker load")?;
-    let save_status = save.wait().context("Failed to wait for docker save")?;
+    let gunzip_status = gunzip.wait().context("Failed to wait for gunzip")?;
 
-    if !save_status.success() {
-        anyhow::bail!("docker save failed for image {}", image);
+    if !gunzip_status.success() {
+        anyhow::bail!("gunzip failed for {}", cache_file.display());
     }
     if !load_status.success() {
-        anyhow::bail!("docker load failed in VM for image {}", image);
+        anyhow::bail!("docker load failed in VM");
     }
 
     Ok(())
 }
 
+fn sync_image(instance_name: &str, image: &str, image_id: &str) -> Result<()> {
+    let cached = cache_path(image_id)?;
+
+    if cached.exists() {
+        println!("  Loading from cache...");
+    } else {
+        println!("  Saving to cache...");
+        save_to_cache(image, image_id)?;
+    }
+
+    println!("  Loading into VM...");
+    load_from_cache(instance_name, &cache_path(image_id)?)?;
+
+    Ok(())
+}
+
 pub fn sync_images_to_vm(instance_name: &str, images: &[String]) -> Result<()> {
+    let mut used_keys = HashSet::new();
+
     for image in images {
         let host_id = match host_image_id(image)? {
             Some(id) => id,
@@ -143,6 +242,8 @@ pub fn sync_images_to_vm(instance_name: &str, images: &[String]) -> Result<()> {
                 continue;
             }
         };
+
+        used_keys.insert(cache_key(&host_id));
 
         let vm_id = vm_image_id(instance_name, image)?;
         if let Some(vm_id) = vm_id {
@@ -153,7 +254,60 @@ pub fn sync_images_to_vm(instance_name: &str, images: &[String]) -> Result<()> {
         }
 
         println!("Syncing image: {}", image);
-        sync_image(instance_name, image)?;
+        sync_image(instance_name, image, &host_id)?;
+    }
+
+    // Cleanup stale cache entries
+    if let Err(e) = cleanup_cache(&used_keys) {
+        eprintln!("Warning: cache cleanup failed: {}", e);
+    }
+
+    Ok(())
+}
+
+/// 7 日超かつ今回使われなかったキャッシュを削除
+fn cleanup_cache(used_keys: &HashSet<String>) -> Result<()> {
+    let dir = cache_dir()?;
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    let now = SystemTime::now();
+    let mut cleaned = 0u64;
+
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        let name = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(n) => n.strip_suffix(".tar").unwrap_or(n).to_string(),
+            None => continue,
+        };
+
+        // Skip if used in this sync
+        if used_keys.contains(&name) {
+            continue;
+        }
+
+        let metadata = entry.metadata()?;
+        let modified = metadata.modified().unwrap_or(now);
+        if let Ok(age) = now.duration_since(modified) {
+            if age > CACHE_MAX_AGE {
+                let size = metadata.len();
+                if let Err(e) = fs::remove_file(&path) {
+                    eprintln!("Warning: failed to remove {}: {}", path.display(), e);
+                } else {
+                    cleaned += size;
+                }
+            }
+        }
+    }
+
+    if cleaned > 0 {
+        println!(
+            "Cache cleanup: removed {:.1} MB of stale images",
+            cleaned as f64 / 1_048_576.0
+        );
     }
 
     Ok(())
