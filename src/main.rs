@@ -21,6 +21,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum VmCommands {
+    /// 現在の worktree に Lima VM を追加
+    Add {
+        /// インスタンス名（省略時は worktree のディレクトリ名から自動生成）
+        name: Option<String>,
+    },
+
     /// Lima VM を起動（compose は起動しない）
     Start {
         /// worktree 名（省略時は現在ディレクトリの worktree）
@@ -241,6 +247,7 @@ fn main() {
         }
         Commands::Status { name } => commands::status::execute(name.as_deref()),
         Commands::Vm { command } => match command {
+            VmCommands::Add { name } => commands::vm::add_vm(name.as_deref()),
             VmCommands::Start { name } => commands::vm::start(name.as_deref()),
             VmCommands::Stop { name } => commands::vm::stop(name.as_deref()),
             VmCommands::Shell { name, shell, workdir, tty, command } => commands::vm::shell(

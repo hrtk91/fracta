@@ -1,10 +1,129 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::config;
 use crate::lima::client as lima;
-use crate::lima::ssh;
-use crate::state::State;
+use crate::lima::{ssh, template};
+use crate::state::{Instance, State};
 use crate::utils;
+
+/// 現在の worktree に Lima VM を追加する
+pub fn add_vm(name: Option<&str>) -> Result<()> {
+    if !lima::is_available() {
+        anyhow::bail!("Lima is not installed. Please install lima first: brew install lima");
+    }
+
+    let main_repo = utils::resolve_main_repo()?;
+    let cwd = std::env::current_dir().context("Failed to get current directory")?;
+    let mut state = State::load(&main_repo)?;
+
+    // fracta 管理下の instance を探す
+    let existing = state.instances.iter().find(|inst| {
+        utils::is_path_within(std::path::Path::new(&inst.path), &cwd)
+    });
+
+    let (instance_name, worktree_path) = if let Some(inst) = existing {
+        // 既に VM が紐付いている場合はエラー
+        if !inst.lima_instance.is_empty() {
+            let info = lima::info(&inst.lima_instance)?;
+            if info != lima::InstanceStatus::NotFound {
+                anyhow::bail!(
+                    "Instance '{}' already has Lima VM '{}'",
+                    inst.name,
+                    inst.lima_instance
+                );
+            }
+        }
+        (inst.name.clone(), PathBuf::from(&inst.path))
+    } else {
+        // fracta 管理外の worktree → 新規登録
+        let dir_name = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .context("Failed to get directory name")?
+            .to_string();
+        let instance_name = name.unwrap_or(&dir_name).to_string();
+
+        if state.find_instance(&instance_name).is_some() {
+            anyhow::bail!("Instance '{}' already exists in state", instance_name);
+        }
+
+        // git worktree かどうか確認
+        let output = Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .current_dir(&cwd)
+            .output()
+            .context("Failed to check git worktree")?;
+        if !output.status.success() {
+            anyhow::bail!("Current directory is not a git repository");
+        }
+
+        let branch = {
+            let output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(&cwd)
+                .output()?;
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+
+        let instance = Instance {
+            name: instance_name.clone(),
+            path: cwd.to_string_lossy().to_string(),
+            branch,
+            lima_instance: String::new(),
+            active_forwards: Vec::new(),
+            active_proxy: None,
+            active_browser: None,
+        };
+        state.add_instance(instance);
+        (instance_name, cwd.clone())
+    };
+
+    let lima_instance = lima::instance_name(&instance_name);
+
+    // Lima インスタンスが既に存在するか確認
+    let info = lima::info(&lima_instance)?;
+    if info != lima::InstanceStatus::NotFound {
+        anyhow::bail!(
+            "Lima instance '{}' already exists. Remove it first with: limactl delete {}",
+            lima_instance,
+            lima_instance
+        );
+    }
+
+    let config = config::load_config(&main_repo, Some(&worktree_path))?;
+
+    // Lima テンプレートを生成
+    println!("Creating Lima VM template...");
+    let template_config = template::TemplateConfig::new(
+        &worktree_path.to_string_lossy(),
+        config.vm_mount_type.as_deref(),
+        config.vm_user.as_deref(),
+    );
+    let temp_template = template::create_temp_template(&template_config)?;
+
+    // Lima VM を作成
+    println!("Creating Lima VM: {}...", lima_instance);
+    lima::create(temp_template.path(), &lima_instance)?;
+
+    // state を更新
+    let inst = state
+        .find_instance_mut(&instance_name)
+        .context("Instance not found in state")?;
+    inst.lima_instance = lima_instance.clone();
+    state.save(&main_repo)?;
+
+    println!("\n=== VM added successfully ===");
+    println!("  Instance: {}", instance_name);
+    println!("  Lima VM:  {}", lima_instance);
+    println!("  Path:     {}", worktree_path.display());
+    println!("\nNext steps:");
+    println!("  fracta up        - Start VM and docker compose");
+    println!("  fracta vm shell  - Connect to VM shell");
+
+    Ok(())
+}
 
 pub fn start(name: Option<&str>) -> Result<()> {
     let main_repo = utils::resolve_main_repo()?;
