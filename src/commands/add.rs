@@ -104,6 +104,7 @@ pub fn execute(name: &str, base_branch: Option<Option<String>>, worktree_only: b
             config.vm_mount_type.as_deref(),
             config.vm_user.as_deref(),
         );
+        template_config.resolve_template(config.vm_template.as_deref(), &main_repo, &worktree_path);
         if let Some(scripts) = &config.vm_provision_scripts {
             template_config.load_provision_scripts(scripts, &main_repo)?;
         }

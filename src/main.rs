@@ -64,6 +64,9 @@ enum VmCommands {
     /// VM 一覧を表示
     #[command(alias = "ls")]
     List,
+
+    /// デフォルトの Lima テンプレートを出力
+    Template,
 }
 
 #[derive(Subcommand)]
@@ -263,6 +266,7 @@ fn main() {
                 &command,
             ),
             VmCommands::List => commands::vm::list(),
+            VmCommands::Template => commands::vm::template(),
         },
         Commands::Browser { command } => match command {
             BrowserCommands::Open { name, browser, url, proxy_port, head, no_head: _ } => {

@@ -11,6 +11,8 @@ pub struct TemplateConfig {
     pub mount_type: String,
     pub user: String,
     pub provision_scripts: Vec<String>,
+    /// カスタムテンプレートファイルのパス（None ならデフォルト）
+    pub custom_template: Option<String>,
 }
 
 impl Default for TemplateConfig {
@@ -23,6 +25,7 @@ impl Default for TemplateConfig {
             mount_type: "virtiofs".to_string(),
             user: "lima".to_string(),
             provision_scripts: Vec::new(),
+            custom_template: None,
         }
     }
 }
@@ -66,6 +69,36 @@ impl TemplateConfig {
         }
         Ok(())
     }
+
+    /// カスタムテンプレートを解決する
+    /// 優先順: vm_template 設定 > .fracta/lima-template.yaml > 内蔵デフォルト
+    pub fn resolve_template(
+        &mut self,
+        vm_template: Option<&str>,
+        main_repo: &Path,
+        worktree_path: &Path,
+    ) {
+        if let Some(path) = vm_template {
+            let resolved = if Path::new(path).is_absolute() {
+                std::path::PathBuf::from(path)
+            } else {
+                main_repo.join(path)
+            };
+            if resolved.exists() {
+                self.custom_template = Some(resolved.to_string_lossy().to_string());
+                return;
+            }
+        }
+
+        // .fracta/lima-template.yaml を探す（worktree → main_repo の順）
+        for dir in &[worktree_path, main_repo] {
+            let candidate = dir.join(".fracta").join("lima-template.yaml");
+            if candidate.exists() {
+                self.custom_template = Some(candidate.to_string_lossy().to_string());
+                return;
+            }
+        }
+    }
 }
 
 /// provision セクションを生成
@@ -83,9 +116,16 @@ fn generate_provision(config: &TemplateConfig) -> String {
 "#,
     );
 
-    // ユーザー指定のプロビジョニングスクリプト（冪等性マーカー付き）
-    for (i, script) in config.provision_scripts.iter().enumerate() {
-        // スクリプト内容のハッシュでマーカーを作る
+    provisions.push_str(&generate_user_provisions(&config.provision_scripts));
+
+    provisions
+}
+
+/// ユーザー指定のプロビジョニングスクリプト（冪等性マーカー付き）を生成
+fn generate_user_provisions(scripts: &[String]) -> String {
+    let mut provisions = String::new();
+
+    for (i, script) in scripts.iter().enumerate() {
         let hash = simple_hash(script);
         let marker = format!("/var/lib/fracta/provisioned/{}", hash);
 
@@ -100,6 +140,15 @@ fn generate_provision(config: &TemplateConfig) -> String {
         echo "Already provisioned ({}), skipping"
         exit 0
       fi
+      # Wait for DNS to be available
+      echo "Waiting for network..."
+      for i in $(seq 1 60); do
+        if nslookup archive.ubuntu.com > /dev/null 2>&1; then
+          echo "Network ready"
+          break
+        fi
+        sleep 5
+      done
 {}
       mkdir -p /var/lib/fracta/provisioned
       touch '{}'
@@ -117,13 +166,12 @@ fn generate_provision(config: &TemplateConfig) -> String {
 }
 
 /// probe セクションを生成（provision スクリプトがある場合のみ）
-fn generate_probes(config: &TemplateConfig) -> String {
-    if config.provision_scripts.is_empty() {
+fn generate_probes(scripts: &[String]) -> String {
+    if scripts.is_empty() {
         return String::new();
     }
 
-    // 最後のプロビジョニングスクリプトのマーカーを待つ
-    let last_hash = simple_hash(config.provision_scripts.last().unwrap());
+    let last_hash = simple_hash(scripts.last().unwrap());
     let marker = format!("/var/lib/fracta/provisioned/{}", last_hash);
 
     format!(
@@ -165,7 +213,7 @@ fn indent_script(script: &str) -> String {
 }
 
 /// 簡易ハッシュ（マーカーファイル名用）
-fn simple_hash(s: &str) -> String {
+pub fn simple_hash(s: &str) -> String {
     // FNV-1a 64bit
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in s.bytes() {
@@ -175,8 +223,8 @@ fn simple_hash(s: &str) -> String {
     format!("{:016x}", hash)
 }
 
-/// Lima VM テンプレートを生成
-pub fn generate(config: &TemplateConfig) -> String {
+/// デフォルトの Lima VM テンプレートを生成
+pub fn generate_default(config: &TemplateConfig) -> String {
     let mount_block = if config.mount_type == "sshfs" {
         format!(
             r#"  - location: "{worktree_path}"
@@ -197,7 +245,7 @@ pub fn generate(config: &TemplateConfig) -> String {
     };
 
     let provision_block = generate_provision(config);
-    let probes_block = generate_probes(config);
+    let probes_block = generate_probes(&config.provision_scripts);
 
     format!(
         r#"# fracta Lima VM template
@@ -256,6 +304,87 @@ provision:
         provision_block = provision_block.trim_end(),
         probes_block = probes_block,
     )
+}
+
+/// カスタムテンプレートに provision スクリプトを注入
+fn inject_provisions_into_template(
+    template: &str,
+    scripts: &[String],
+) -> String {
+    if scripts.is_empty() {
+        return template.to_string();
+    }
+
+    let user_provisions = generate_user_provisions(scripts);
+    let probes = generate_probes(scripts);
+
+    let mut result = template.to_string();
+
+    // provision: セクションがあればその末尾に追加
+    if let Some(pos) = find_yaml_section_end(&result, "provision:") {
+        result.insert_str(pos, &user_provisions);
+    } else {
+        // provision セクションがなければ末尾に追加
+        result.push_str("\nprovision:\n");
+        result.push_str(&user_provisions);
+    }
+
+    // probes セクションを追加（既存があれば末尾に）
+    if let Some(pos) = find_yaml_section_end(&result, "probes:") {
+        let probe_entries = probes
+            .trim_start_matches('\n')
+            .trim_start_matches("# Wait for provisioning to complete\n")
+            .trim_start_matches("probes:\n");
+        result.insert_str(pos, probe_entries);
+    } else {
+        result.push_str(&probes);
+    }
+
+    result
+}
+
+/// YAML のトップレベルセクションの末尾位置を見つける
+fn find_yaml_section_end(yaml: &str, section: &str) -> Option<usize> {
+    let section_start = yaml.find(section)?;
+    let after_section = section_start + section.len();
+
+    // セクション開始以降の行を見て、次のトップレベルキーを探す
+    let remaining = &yaml[after_section..];
+    for (i, line) in remaining.lines().enumerate() {
+        if i == 0 {
+            continue; // セクション行自体はスキップ
+        }
+        // 空行でもインデントされた行でもない = 次のトップレベルキー
+        if !line.is_empty()
+            && !line.starts_with(' ')
+            && !line.starts_with('#')
+            && !line.starts_with('\t')
+        {
+            // この行の開始位置を返す
+            let line_start = remaining[..remaining.find(line).unwrap_or(0)].len();
+            return Some(after_section + line_start);
+        }
+    }
+
+    // セクションが末尾まで続いている
+    Some(yaml.len())
+}
+
+/// テンプレートを生成（カスタム or デフォルト）
+pub fn generate(config: &TemplateConfig) -> String {
+    if let Some(template_path) = &config.custom_template {
+        if let Ok(custom) = std::fs::read_to_string(template_path) {
+            // カスタムテンプレートに worktree_path を置換
+            let processed = custom
+                .replace("{{WORKTREE_PATH}}", &config.worktree_path)
+                .replace("{{USER}}", &config.user)
+                .replace("{{CPUS}}", &config.cpus.to_string())
+                .replace("{{MEMORY}}", &config.memory)
+                .replace("{{DISK}}", &config.disk);
+            return inject_provisions_into_template(&processed, &config.provision_scripts);
+        }
+    }
+    generate_default(config)
 }
 
 /// 一時テンプレートファイルを作成
@@ -331,5 +460,31 @@ mod tests {
         let indented = indent_script(script);
         assert!(!indented.contains("#!/bin/bash"));
         assert!(indented.contains("      echo hello"));
+    }
+
+    #[test]
+    fn test_inject_provisions_into_custom_template() {
+        let template = r#"vmType: "vz"
+provision:
+  - mode: system
+    script: |
+      echo "custom setup"
+networks:
+  - vzNAT: true
+"#;
+        let scripts = vec!["echo 'hello'".to_string()];
+        let result = inject_provisions_into_template(template, &scripts);
+
+        assert!(result.contains("custom setup"));
+        assert!(result.contains("echo 'hello'"));
+        assert!(result.contains("probes:"));
+    }
+
+    #[test]
+    fn test_custom_template_placeholders() {
+        let mut config = TemplateConfig::new("/my/worktree", None, None);
+        config.custom_template = None; // will use default
+        let template = generate(&config);
+        assert!(template.contains("/my/worktree"));
     }
 }

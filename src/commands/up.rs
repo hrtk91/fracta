@@ -48,6 +48,7 @@ pub fn execute(
                 config.vm_mount_type.as_deref(),
                 config.vm_user.as_deref(),
             );
+            tmpl_cfg.resolve_template(config.vm_template.as_deref(), &main_repo, &worktree_path);
             if let Some(scripts) = &config.vm_provision_scripts {
                 tmpl_cfg.load_provision_scripts(scripts, &main_repo)?;
             }

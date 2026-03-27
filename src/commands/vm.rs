@@ -101,6 +101,7 @@ pub fn add_vm(name: Option<&str>) -> Result<()> {
         config.vm_mount_type.as_deref(),
         config.vm_user.as_deref(),
     );
+    template_config.resolve_template(config.vm_template.as_deref(), &main_repo, &worktree_path);
     if let Some(scripts) = &config.vm_provision_scripts {
         template_config.load_provision_scripts(scripts, &main_repo)?;
     }
@@ -306,5 +307,13 @@ pub fn list() -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+/// デフォルトの Lima テンプレートを stdout に出力
+pub fn template() -> Result<()> {
+    let config = template::TemplateConfig::new("{{WORKTREE_PATH}}", None, None);
+    let content = template::generate_default(&config);
+    print!("{}", content);
     Ok(())
 }

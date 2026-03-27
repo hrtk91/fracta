@@ -10,6 +10,7 @@ pub struct Config {
     pub vm_user: Option<String>,
     pub vm_build_copy: Option<bool>,
     pub vm_build_dir: Option<String>,
+    pub vm_template: Option<String>,
     pub vm_provision_scripts: Option<Vec<String>>,
     pub vm_provision_timeout: Option<String>,
     pub hooks: Option<HookCommands>,
@@ -136,6 +137,9 @@ fn merge_config(target: &mut Config, incoming: Config) {
     }
     if incoming.vm_build_dir.is_some() {
         target.vm_build_dir = incoming.vm_build_dir;
+    }
+    if incoming.vm_template.is_some() {
+        target.vm_template = incoming.vm_template;
     }
     if incoming.vm_provision_scripts.is_some() {
         target.vm_provision_scripts = incoming.vm_provision_scripts;
