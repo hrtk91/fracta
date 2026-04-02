@@ -136,6 +136,7 @@ fn generate_user_provisions(scripts: &[String]) -> String {
       #!/bin/bash
       set -eux -o pipefail
       # Provision script {} (hash: {})
+      export FRACTA_VM_USER="{{{{.User}}}}"
       if [ -f '{}' ]; then
         echo "Already provisioned ({}), skipping"
         exit 0
